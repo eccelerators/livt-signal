@@ -1,0 +1,84 @@
+namespace Livt.Signal.Oscillator
+
+using Livt.Math.Trigonometry
+using Livt.Signal.Transform
+
+/**
+ * Generates an unframed complex Q1.15 oscillator with a resource-shared CORDIC.
+ * The unsigned PHASE_BITS accumulator represents one complete turn modulo
+ * 2^PHASE_BITS. It advances by phaseIncrement only when an output token is
+ * accepted, so downstream stalls preserve oscillator/sample coherence.
+ */
+component CordicNcoQ15<PHASE_BITS: int = 32, INITIAL_PHASE: int = 0>
+{
+	static assert PHASE_BITS >= 16 && PHASE_BITS <= 32,
+		"CORDIC NCO phase width must be in 16..32"
+
+	public const OUTPUT_LANES: int = 1
+	public const CORDIC_ITERATIONS: int = 16
+	public const MAX_ERROR_LSB: int = 4
+
+	outputStream: IComplexSampleStream<logic[16]>
+	cordic: CordicSinCosQ15
+	accumulator: logic[PHASE_BITS]
+
+	/**
+	 * Runtime frequency-control word in modulo-turn phase units per sample.
+	 */
+	public phaseIncrement: in logic[PHASE_BITS]
+
+	/**
+	 * Phase associated with the currently offered or next computed sample.
+	 */
+	public phase: out logic[PHASE_BITS]
+
+	/**
+	 * Binds the oscillator output to a borrowed producer endpoint.
+	 */
+	new(outputStream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.outputStream = outputStream
+		cordic = new CordicSinCosQ15()
+		accumulator = INITIAL_PHASE as logic[PHASE_BITS]
+	}
+
+	/**
+	 * Exposes the modulo phase without introducing another state owner.
+	 */
+	process Observe[]()
+	{
+		phase = accumulator
+	}
+
+	/**
+	 * Computes and offers one oscillator token at a time.
+	 */
+	process Generate()
+	{
+		state Calculate {
+			var phaseQ15 = accumulator[PHASE_BITS - 16: PHASE_BITS] as int
+			cordic.Compute(phaseQ15)
+			outputStream.real = cordic.GetCos() as logic[16]
+			outputStream.imag = cordic.GetSin() as logic[16]
+			outputStream.valid = true
+			outputStream.first = false
+			outputStream.last = false
+			goto Offer
+		}
+
+		state Offer {
+			if (outputStream.ready) {
+				outputStream.valid = false
+				accumulator = ((accumulator as uint)
+					+ (phaseIncrement as uint)) as logic[PHASE_BITS]
+				goto Advance
+			}
+		}
+
+		state Advance {
+			// Allow the owned accumulator update to become visible before
+			// slicing the phase for the next serialized CORDIC request.
+			goto Calculate
+		}
+	}
+}

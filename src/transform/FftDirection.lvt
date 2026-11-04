@@ -1,0 +1,10 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Selects the sign of the transform kernel without selecting an architecture.
+ */
+public enum FftDirection
+{
+	Forward
+	Inverse
+}

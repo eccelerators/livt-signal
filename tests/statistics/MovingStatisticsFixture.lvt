@@ -1,0 +1,328 @@
+namespace Livt.Signal.Statistics
+
+using Livt.Signal.Stream
+
+/**
+ * Sends a fixed six-sample signed sequence as continuous ready/valid traffic.
+ */
+component Int16StatisticsTestSource
+{
+	stream: IInt16SampleStream
+	index: int
+
+	new(stream: flip IInt16SampleStream)
+	{
+		this.stream = stream
+	}
+
+	fn SampleAt[](position: int) int
+	{
+		if (position == 0) {
+			return 1
+		}
+
+		if (position == 1) {
+			return 2
+		}
+
+		if (position == 2) {
+			return 3
+		}
+
+		if (position == 3) {
+			return 4
+		}
+
+		if (position == 4) {
+			return 5
+		}
+
+		return -2
+	}
+
+	process Send()
+	{
+		state {
+			if (index < 6) {
+				stream.sample = SampleAt(index) as logic[16]
+				stream.valid = true
+				stream.first = index == 0
+				stream.last = index == 5
+
+				if (stream.ready) {
+					index++
+				}
+			} else {
+				stream.valid = false
+				stream.first = false
+				stream.last = false
+			}
+		}
+	}
+}
+
+/**
+ * Captures the first three signed statistic results.
+ */
+component Int32StatisticsTestSink
+{
+	stream: IInt32SampleStream
+	public accepted: int
+	public value0: int
+	public value1: int
+	public value2: int
+	public first0: bool
+	public last2: bool
+	public sawStall: bool
+
+	new(stream: IInt32SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Ready[]()
+	{
+		stream.ready = this.context.rst == 0b0
+	}
+
+	process Capture()
+	{
+		state {
+			if (stream.valid && !stream.ready) {
+				sawStall = true
+			}
+
+			if (stream.valid && stream.ready) {
+				if (accepted == 0) {
+					value0 = stream.sample
+					first0 = stream.first
+				} elif (accepted == 1) {
+					value1 = stream.sample
+				} elif (accepted == 2) {
+					value2 = stream.sample
+					last2 = stream.last
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Captures the first three unsigned statistic results.
+ */
+component UInt32StatisticsTestSink
+{
+	stream: IUInt32SampleStream
+	public accepted: int
+	public value0: uint
+	public value1: uint
+	public value2: uint
+	public first0: bool
+	public last2: bool
+	public sawStall: bool
+
+	new(stream: IUInt32SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Ready[]()
+	{
+		stream.ready = this.context.rst == 0b0
+	}
+
+	process Capture()
+	{
+		state {
+			if (stream.valid && !stream.ready) {
+				sawStall = true
+			}
+
+			if (stream.valid && stream.ready) {
+				if (accepted == 0) {
+					value0 = stream.sample
+					first0 = stream.first
+				} elif (accepted == 1) {
+					value1 = stream.sample
+				} elif (accepted == 2) {
+					value2 = stream.sample
+					last2 = stream.last
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Composes independent sources, all four statistics, and result observers.
+ */
+component MovingStatisticsFixture
+{
+	sumInput: IInt16SampleStream
+	sumOutput: IInt32SampleStream
+	meanInput: IInt16SampleStream
+	meanOutput: IInt32SampleStream
+	rmsInput: IInt16SampleStream
+	rmsOutput: IUInt32SampleStream
+	varianceInput: IInt16SampleStream
+	varianceOutput: IUInt32SampleStream
+
+	sumSource: Int16StatisticsTestSource
+	meanSource: Int16StatisticsTestSource
+	rmsSource: Int16StatisticsTestSource
+	varianceSource: Int16StatisticsTestSource
+	sum: MovingSumInt16<4>
+	mean: MovingMeanInt16<4>
+	rms: MovingRmsInt16<4>
+	variance: MovingVarianceInt16<4>
+	sumSink: Int32StatisticsTestSink
+	meanSink: Int32StatisticsTestSink
+	rmsSink: UInt32StatisticsTestSink
+	varianceSink: UInt32StatisticsTestSink
+
+	public sumAccepted: out int
+	public sum0: out int
+	public sum1: out int
+	public sum2: out int
+	public meanAccepted: out int
+	public mean0: out int
+	public mean1: out int
+	public mean2: out int
+	public rmsAccepted: out int
+	public rms0: out uint
+	public rms1: out uint
+	public rms2: out uint
+	public varianceAccepted: out int
+	public variance0: out uint
+	public variance1: out uint
+	public variance2: out uint
+	public firstResults: out bool
+	public lastResults: out bool
+	public windowsFull: out bool
+
+	new()
+	{
+		sumSource = new Int16StatisticsTestSource(sumInput)
+		meanSource = new Int16StatisticsTestSource(meanInput)
+		rmsSource = new Int16StatisticsTestSource(rmsInput)
+		varianceSource = new Int16StatisticsTestSource(varianceInput)
+		sum = new MovingSumInt16<4>(sumInput, sumOutput)
+		mean = new MovingMeanInt16<4>(meanInput, meanOutput)
+		rms = new MovingRmsInt16<4>(rmsInput, rmsOutput)
+		variance = new MovingVarianceInt16<4>(varianceInput, varianceOutput)
+		sumSink = new Int32StatisticsTestSink(sumOutput)
+		meanSink = new Int32StatisticsTestSink(meanOutput)
+		rmsSink = new UInt32StatisticsTestSink(rmsOutput)
+		varianceSink = new UInt32StatisticsTestSink(varianceOutput)
+	}
+
+	process Observe[]()
+	{
+		sumAccepted = sumSink.accepted
+		sum0 = sumSink.value0
+		sum1 = sumSink.value1
+		sum2 = sumSink.value2
+		meanAccepted = meanSink.accepted
+		mean0 = meanSink.value0
+		mean1 = meanSink.value1
+		mean2 = meanSink.value2
+		rmsAccepted = rmsSink.accepted
+		rms0 = rmsSink.value0
+		rms1 = rmsSink.value1
+		rms2 = rmsSink.value2
+		varianceAccepted = varianceSink.accepted
+		variance0 = varianceSink.value0
+		variance1 = varianceSink.value1
+		variance2 = varianceSink.value2
+		firstResults = sumSink.first0 || meanSink.first0 || rmsSink.first0 || varianceSink.first0
+		lastResults = sumSink.last2 && meanSink.last2 && rmsSink.last2 && varianceSink.last2
+		windowsFull = sum.windowFull && mean.windowFull && rms.windowFull && variance.windowFull
+	}
+}
+
+/**
+ * Sends the signed-16 extrema for capacity-one boundary verification.
+ */
+component Int16ExtremeTestSource
+{
+	stream: IInt16SampleStream
+	index: int
+
+	new(stream: flip IInt16SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Send()
+	{
+		state {
+			if (index < 2) {
+				if (index == 0) {
+					stream.sample = 0x8000
+				} else {
+					stream.sample = 0x7FFF
+				}
+
+				stream.valid = true
+				stream.first = index == 0
+				stream.last = index == 1
+
+				if (stream.ready) {
+					index++
+				}
+			} else {
+				stream.valid = false
+				stream.first = false
+				stream.last = false
+			}
+		}
+	}
+}
+
+/**
+ * Composes capacity-one RMS and variance paths at both signed extrema.
+ */
+component MovingStatisticsExtremeFixture
+{
+	rmsInput: IInt16SampleStream
+	rmsOutput: IUInt32SampleStream
+	varianceInput: IInt16SampleStream
+	varianceOutput: IUInt32SampleStream
+	rmsSource: Int16ExtremeTestSource
+	varianceSource: Int16ExtremeTestSource
+	rms: MovingRmsInt16<1>
+	variance: MovingVarianceInt16<1>
+	rmsSink: UInt32StatisticsTestSink
+	varianceSink: UInt32StatisticsTestSink
+
+	public rmsAccepted: out int
+	public rms0: out uint
+	public rms1: out uint
+	public varianceAccepted: out int
+	public variance0: out uint
+	public variance1: out uint
+
+	new()
+	{
+		rmsSource = new Int16ExtremeTestSource(rmsInput)
+		varianceSource = new Int16ExtremeTestSource(varianceInput)
+		rms = new MovingRmsInt16<1>(rmsInput, rmsOutput)
+		variance = new MovingVarianceInt16<1>(varianceInput, varianceOutput)
+		rmsSink = new UInt32StatisticsTestSink(rmsOutput)
+		varianceSink = new UInt32StatisticsTestSink(varianceOutput)
+	}
+
+	process Observe[]()
+	{
+		rmsAccepted = rmsSink.accepted
+		rms0 = rmsSink.value0
+		rms1 = rmsSink.value1
+		varianceAccepted = varianceSink.accepted
+		variance0 = varianceSink.value0
+		variance1 = varianceSink.value1
+	}
+}

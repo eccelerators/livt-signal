@@ -1,0 +1,135 @@
+namespace Livt.Signal.Statistics
+
+using Livt.Math.Arithmetic
+using Livt.Signal.Stream
+
+/**
+ * Exact full-window moving mean with signed nearest-even rounding.
+ */
+component MovingMeanInt16<WINDOW_SIZE: int = 16>
+{
+	static assert WINDOW_SIZE >= 1 && WINDOW_SIZE <= 65535, "window size must be 1..65535"
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 64
+	public const CAPACITY: int = 64
+	const SUM_BITS: int = 16 + Bits.RequiredFor(WINDOW_SIZE - 1) - (1 / WINDOW_SIZE)
+
+	// Borrowed streams and the owned rounded-division datapath.
+	inputStream: IInt16SampleStream
+	outputStream: IInt32SampleStream
+	divider: UnsignedDivisionPipelinePrimitive
+
+	// Circular sample storage and its running-window position and sum.
+	@Memory(Style = MemoryStyle.Auto)
+	@UninitializedStorage
+	samples: logic[WINDOW_SIZE, 16]
+
+	count: int
+	pointer: int
+	sum: logic[SUM_BITS]
+
+	// Observable window occupancy and readiness.
+	public fillCount: out int
+	public windowFull: out bool
+
+	/**
+	 * Binds borrowed streams and owns the divider used by this moving window.
+	 */
+	new(inputStream: IInt16SampleStream, outputStream: flip IInt32SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		divider = new UnsignedDivisionPipelinePrimitive()
+	}
+
+	/**
+	 * Computes the next exact sum and connects it to the rounded division pipeline.
+	 */
+	process Drive[]()
+	{
+		var incoming = inputStream.sample as int
+		var outgoing = 0
+
+		if (count == WINDOW_SIZE) {
+			outgoing = samples[pointer] as int
+		}
+
+		var nextSum = (sum as int) + incoming - outgoing
+		var magnitude = nextSum
+		var tag: logic[64] = 0
+		var divisor: logic[64] = 0
+		divisor[0: 32] = (WINDOW_SIZE as uint) as logic[32]
+
+		if (nextSum < 0) {
+			magnitude = 0 - nextSum
+			tag[2] = 0b1
+		}
+
+		if (inputStream.first) {
+			tag[0] = 0b1
+		}
+
+		if (inputStream.last) {
+			tag[1] = 0b1
+		}
+
+		var rounded = divider.quotient as uint
+		var twiceRemainder = (divider.remainder as uint) * 2
+
+		if (twiceRemainder > (WINDOW_SIZE as uint)
+			|| (twiceRemainder == (WINDOW_SIZE as uint) && (rounded & 1) == 1)) {
+			rounded++
+		}
+
+		var signedResult = rounded as int
+
+		if (divider.outputTag[2] == 0b1) {
+			signedResult = 0 - signedResult
+		}
+
+		divider.inputValid = inputStream.valid && count >= WINDOW_SIZE - 1
+		divider.dividend = magnitude as logic[64]
+		divider.divisor = divisor
+		divider.inputTag = tag
+		divider.outputReady = outputStream.ready
+		inputStream.ready = this.context.rst == 0b0 && divider.inputReady
+		outputStream.valid = this.context.rst == 0b0 && divider.outputValid
+		outputStream.sample = signedResult
+		outputStream.first = divider.outputTag[0] == 0b1
+		outputStream.last = divider.outputTag[1] == 0b1
+		fillCount = count
+		windowFull = count == WINDOW_SIZE
+	}
+
+	/**
+	 * Retains the circular sample window and exact running sum.
+	 */
+	process Update()
+	{
+		state {
+			if (inputStream.valid && inputStream.ready) {
+				var incoming = inputStream.sample as int
+				var outgoing = 0
+
+				if (count == WINDOW_SIZE) {
+					outgoing = samples[pointer] as int
+				} else {
+					count++
+				}
+
+				samples[pointer] = inputStream.sample
+				sum = ((sum as int) + incoming - outgoing) as logic[SUM_BITS]
+
+				static if (WINDOW_SIZE > 1) {
+					if (pointer == WINDOW_SIZE - 1) {
+						pointer = 0
+					} else {
+						pointer++
+					}
+				}
+			}
+		}
+	}
+}

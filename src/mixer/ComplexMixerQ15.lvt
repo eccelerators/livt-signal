@@ -1,0 +1,56 @@
+namespace Livt.Signal.Mixer
+
+using Livt.Signal.Transform
+
+/**
+ * Multiplies paired complex Q1.15 sample and oscillator streams.
+ */
+component ComplexMixerQ15
+{
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 1
+	public const MULTIPLIERS: int = 4
+
+	// Borrowed paired inputs, output stream, and the owned mixer datapath.
+	inputStream: IComplexSampleStream<logic[16]>
+	oscillatorStream: IComplexSampleStream<logic[16]>
+	outputStream: IComplexSampleStream<logic[16]>
+	primitive: Q15MixerPipelinePrimitive
+
+	/**
+	 * Binds paired complex inputs and one complex output.
+	 */
+	new(inputStream: IComplexSampleStream<logic[16]>,
+		oscillatorStream: IComplexSampleStream<logic[16]>,
+		outputStream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.inputStream = inputStream
+		this.oscillatorStream = oscillatorStream
+		this.outputStream = outputStream
+		primitive = new Q15MixerPipelinePrimitive(false)
+	}
+
+	/**
+	 * Joins both inputs atomically and preserves the sample frame markers.
+	 */
+	process Drive[]()
+	{
+		primitive.sampleValid = inputStream.valid
+		primitive.sampleReal = inputStream.real
+		primitive.sampleImag = inputStream.imag
+		primitive.sampleFirst = inputStream.first
+		primitive.sampleLast = inputStream.last
+		primitive.oscillatorValid = oscillatorStream.valid
+		primitive.oscillatorReal = oscillatorStream.real
+		primitive.oscillatorImag = oscillatorStream.imag
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.sampleReady
+		oscillatorStream.ready = primitive.oscillatorReady
+		outputStream.valid = primitive.outputValid
+		outputStream.real = primitive.outputReal
+		outputStream.imag = primitive.outputImag
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+	}
+}

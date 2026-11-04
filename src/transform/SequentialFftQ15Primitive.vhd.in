@@ -1,0 +1,346 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+use work.livt_lang_icontext_package.all;
+use work.livt_lang_package.all;
+
+entity livt_signal_transform_sequentialfftq15primitive is
+    port (
+        ctor_lvt_context_in : in t_icontext_in;
+        ctor_sampleshape : in std_logic_vector;
+        ctor_stageshape : in std_logic_vector;
+        ctor_stageshiftmask : in signed(31 downto 0);
+        ctor_inverse : in boolean;
+        ctor_inputbitreversed : in boolean;
+        ctor_outputbitreversed : in boolean;
+        ctor_inputvalid : in boolean;
+        ctor_inputready : out boolean;
+        ctor_inputreal : in std_logic_vector(15 downto 0);
+        ctor_inputimag : in std_logic_vector(15 downto 0);
+        ctor_inputfirst : in boolean;
+        ctor_inputlast : in boolean;
+        ctor_outputvalid : out boolean;
+        ctor_outputready : in boolean;
+        ctor_outputreal : out std_logic_vector(15 downto 0);
+        ctor_outputimag : out std_logic_vector(15 downto 0);
+        ctor_outputfirst : out boolean;
+        ctor_outputlast : out boolean;
+        ctor_framelengtherror : out boolean
+    );
+end;
+
+architecture rtl of livt_signal_transform_sequentialfftq15primitive is
+    constant SAMPLES : positive := ctor_sampleshape'length;
+    constant STAGES : positive := ctor_stageshape'length;
+    constant MASTER_SAMPLES : positive := 4096;
+
+    subtype complex_word_t is std_logic_vector(31 downto 0);
+    subtype q15_t is signed(15 downto 0);
+    subtype product_t is signed(31 downto 0);
+    subtype complex_product_t is signed(32 downto 0);
+    subtype butterfly_t is signed(33 downto 0);
+    type sample_memory_t is array (0 to SAMPLES - 1) of complex_word_t;
+    type phase_t is (load_frame, compute_read, compute_write,
+        emit_read, emit_hold);
+
+    function supported_size(value : positive) return boolean is
+    begin
+        return value = 8 or value = 16 or value = 32 or value = 64 or
+            value = 128 or value = 256 or value = 512 or value = 1024 or
+            value = 2048 or value = 4096;
+    end;
+
+    function reverse_bits(value : natural; width : positive) return natural is
+        variable remaining : natural := value;
+        variable result : natural := 0;
+    begin
+        for bit_index in 0 to width - 1 loop
+            result := result * 2 + remaining mod 2;
+            remaining := remaining / 2;
+        end loop;
+        return result;
+    end;
+
+    function pack_complex(real_part, imag_part : q15_t)
+        return complex_word_t is
+    begin
+        return std_logic_vector(real_part) & std_logic_vector(imag_part);
+    end;
+
+    function quantize_q15(value : butterfly_t; stage_shift : natural)
+        return q15_t is
+        constant TOTAL_SHIFT : natural := 15 + stage_shift;
+        variable extended : signed(34 downto 0);
+        variable magnitude, rounded : unsigned(34 downto 0);
+        variable sticky : boolean := false;
+        variable raw : integer;
+    begin
+        extended := resize(value, extended'length);
+        if extended(extended'high) = '1' then
+            magnitude := unsigned(-extended);
+        else
+            magnitude := unsigned(extended);
+        end if;
+
+        rounded := shift_right(magnitude, TOTAL_SHIFT);
+        if magnitude(TOTAL_SHIFT - 1) = '1' then
+            for bit_index in 0 to TOTAL_SHIFT - 2 loop
+                if magnitude(bit_index) = '1' then sticky := true; end if;
+            end loop;
+            if sticky or rounded(0) = '1' then rounded := rounded + 1; end if;
+        end if;
+
+        if extended(extended'high) = '1' then
+            if rounded >= resize(to_unsigned(32768, 16), rounded'length) then
+                return to_signed(-32768, 16);
+            end if;
+            raw := to_integer(rounded(15 downto 0));
+            return to_signed(-raw, 16);
+        end if;
+        if rounded > resize(to_unsigned(32767, 15), rounded'length) then
+            return to_signed(32767, 16);
+        end if;
+        return signed(rounded(15 downto 0));
+    end;
+
+    function twiddle(master_index : natural; inverse : boolean)
+        return complex_word_t is
+        variable real_part, imag_part : integer;
+    begin
+        case master_index is
+        -- GENERATED_TWIDDLE_CASE
+            when others => real_part := 0; imag_part := 0;
+        end case;
+        if inverse then
+            if imag_part = -32768 then imag_part := 32767;
+            else imag_part := -imag_part; end if;
+        end if;
+        return pack_complex(to_signed(real_part, 16), to_signed(imag_part, 16));
+    end;
+
+    signal sample_memory : sample_memory_t := (others => (others => '0'));
+    attribute ram_style : string;
+    attribute ram_style of sample_memory : signal is "block";
+
+    signal phase : phase_t := load_frame;
+    signal frame_active : boolean := false;
+    signal load_count : natural range 0 to SAMPLES - 1 := 0;
+    signal stage_index : natural range 0 to STAGES - 1 := 0;
+    signal group_base : natural range 0 to SAMPLES - 1 := 0;
+    signal group_size : natural range 2 to SAMPLES := 2;
+    signal half_size : natural range 1 to SAMPLES / 2 := 1;
+    signal position : natural range 0 to SAMPLES / 2 - 1 := 0;
+    signal twiddle_stride : natural range 1 to SAMPLES / 2 := SAMPLES / 2;
+    signal twiddle_index : natural range 0 to SAMPLES / 2 - 1 := 0;
+    signal address_a, address_b : natural range 0 to SAMPLES - 1 := 0;
+    signal operand_a, operand_b, operand_twiddle : complex_word_t :=
+        (others => '0');
+    signal emit_index : natural range 0 to SAMPLES - 1 := 0;
+    signal output_word : complex_word_t := (others => '0');
+    signal frame_length_error : boolean := false;
+begin
+    ctor_inputready <= ctor_lvt_context_in.rst = '0' and phase = load_frame;
+    ctor_outputvalid <= ctor_lvt_context_in.rst = '0' and phase = emit_hold;
+    ctor_outputreal <= output_word(31 downto 16);
+    ctor_outputimag <= output_word(15 downto 0);
+    ctor_outputfirst <= emit_index = 0;
+    ctor_outputlast <= emit_index = SAMPLES - 1;
+    ctor_framelengtherror <= frame_length_error;
+
+    process (ctor_lvt_context_in.clk)
+        variable logical_index, memory_address : natural;
+        variable next_address_a, next_address_b : natural;
+        variable master_twiddle_index : natural;
+        variable ar, ai, br, bi, wr, wi : q15_t;
+        variable product_rr, product_ii, product_ri, product_ir : product_t;
+        variable twiddle_real, twiddle_imag : complex_product_t;
+        variable aligned_real, aligned_imag : complex_product_t;
+        variable sum_real, sum_imag, difference_real, difference_imag : butterfly_t;
+        variable result_a_real, result_a_imag : q15_t;
+        variable result_b_real, result_b_imag : q15_t;
+        variable selected_shift : natural range 0 to 1;
+    begin
+        if rising_edge(ctor_lvt_context_in.clk) then
+            if ctor_lvt_context_in.rst = '1' then
+                phase <= load_frame;
+                frame_active <= false;
+                load_count <= 0;
+                stage_index <= 0;
+                group_base <= 0;
+                group_size <= 2;
+                half_size <= 1;
+                position <= 0;
+                twiddle_stride <= SAMPLES / 2;
+                twiddle_index <= 0;
+                emit_index <= 0;
+                output_word <= (others => '0');
+                frame_length_error <= false;
+            else
+                assert supported_size(SAMPLES)
+                    report "sequential FFT length must be in 8..4096" severity failure;
+                assert 2 ** STAGES = SAMPLES
+                    report "sequential FFT length must be a power of two" severity failure;
+                assert to_integer(ctor_stageshiftmask) >= -1 and
+                    to_integer(ctor_stageshiftmask) <= 4095
+                    report "invalid FFT stage shift mask" severity failure;
+
+                frame_length_error <= false;
+
+                case phase is
+                    when load_frame =>
+                        if ctor_inputvalid then
+                            if ctor_inputfirst then
+                                if frame_active then frame_length_error <= true; end if;
+                                logical_index := 0;
+                                if ctor_inputbitreversed then
+                                    memory_address := logical_index;
+                                else
+                                    memory_address := reverse_bits(logical_index, STAGES);
+                                end if;
+                                sample_memory(memory_address) <= pack_complex(
+                                    signed(ctor_inputreal), signed(ctor_inputimag));
+                                load_count <= 1;
+                                frame_active <= true;
+                                if ctor_inputlast then
+                                    frame_length_error <= true;
+                                    frame_active <= false;
+                                    load_count <= 0;
+                                end if;
+                            elsif frame_active then
+                                logical_index := load_count;
+                                if ctor_inputbitreversed then
+                                    memory_address := logical_index;
+                                else
+                                    memory_address := reverse_bits(logical_index, STAGES);
+                                end if;
+                                sample_memory(memory_address) <= pack_complex(
+                                    signed(ctor_inputreal), signed(ctor_inputimag));
+
+                                if ctor_inputlast then
+                                    if load_count = SAMPLES - 1 then
+                                        frame_active <= false;
+                                        load_count <= 0;
+                                        stage_index <= 0;
+                                        group_base <= 0;
+                                        group_size <= 2;
+                                        half_size <= 1;
+                                        position <= 0;
+                                        twiddle_stride <= SAMPLES / 2;
+                                        twiddle_index <= 0;
+                                        phase <= compute_read;
+                                    else
+                                        frame_length_error <= true;
+                                        frame_active <= false;
+                                        load_count <= 0;
+                                    end if;
+                                elsif load_count = SAMPLES - 1 then
+                                    frame_length_error <= true;
+                                    frame_active <= false;
+                                    load_count <= 0;
+                                else
+                                    load_count <= load_count + 1;
+                                end if;
+                            else
+                                frame_length_error <= true;
+                            end if;
+                        end if;
+
+                    when compute_read =>
+                        next_address_a := group_base + position;
+                        next_address_b := next_address_a + half_size;
+                        address_a <= next_address_a;
+                        address_b <= next_address_b;
+                        operand_a <= sample_memory(next_address_a);
+                        operand_b <= sample_memory(next_address_b);
+                        master_twiddle_index := twiddle_index
+                            * (MASTER_SAMPLES / SAMPLES);
+                        operand_twiddle <= twiddle(master_twiddle_index,
+                            ctor_inverse);
+                        phase <= compute_write;
+
+                    when compute_write =>
+                        ar := signed(operand_a(31 downto 16));
+                        ai := signed(operand_a(15 downto 0));
+                        br := signed(operand_b(31 downto 16));
+                        bi := signed(operand_b(15 downto 0));
+                        wr := signed(operand_twiddle(31 downto 16));
+                        wi := signed(operand_twiddle(15 downto 0));
+                        product_rr := br * wr;
+                        product_ii := bi * wi;
+                        product_ri := br * wi;
+                        product_ir := bi * wr;
+                        twiddle_real := resize(product_rr, 33)
+                            - resize(product_ii, 33);
+                        twiddle_imag := resize(product_ri, 33)
+                            + resize(product_ir, 33);
+                        aligned_real := shift_left(resize(ar, 33), 15);
+                        aligned_imag := shift_left(resize(ai, 33), 15);
+                        sum_real := resize(aligned_real, 34)
+                            + resize(twiddle_real, 34);
+                        sum_imag := resize(aligned_imag, 34)
+                            + resize(twiddle_imag, 34);
+                        difference_real := resize(aligned_real, 34)
+                            - resize(twiddle_real, 34);
+                        difference_imag := resize(aligned_imag, 34)
+                            - resize(twiddle_imag, 34);
+                        if ctor_stageshiftmask(stage_index) = '1' then
+                            selected_shift := 1;
+                        else
+                            selected_shift := 0;
+                        end if;
+                        result_a_real := quantize_q15(sum_real, selected_shift);
+                        result_a_imag := quantize_q15(sum_imag, selected_shift);
+                        result_b_real := quantize_q15(difference_real, selected_shift);
+                        result_b_imag := quantize_q15(difference_imag, selected_shift);
+                        sample_memory(address_a) <= pack_complex(
+                            result_a_real, result_a_imag);
+                        sample_memory(address_b) <= pack_complex(
+                            result_b_real, result_b_imag);
+
+                        if position + 1 < half_size then
+                            position <= position + 1;
+                            twiddle_index <= twiddle_index + twiddle_stride;
+                            phase <= compute_read;
+                        elsif group_base + group_size < SAMPLES then
+                            group_base <= group_base + group_size;
+                            position <= 0;
+                            twiddle_index <= 0;
+                            phase <= compute_read;
+                        elsif stage_index + 1 < STAGES then
+                            stage_index <= stage_index + 1;
+                            group_base <= 0;
+                            group_size <= group_size * 2;
+                            half_size <= half_size * 2;
+                            position <= 0;
+                            twiddle_stride <= twiddle_stride / 2;
+                            twiddle_index <= 0;
+                            phase <= compute_read;
+                        else
+                            emit_index <= 0;
+                            phase <= emit_read;
+                        end if;
+
+                    when emit_read =>
+                        if ctor_outputbitreversed then
+                            memory_address := reverse_bits(emit_index, STAGES);
+                        else
+                            memory_address := emit_index;
+                        end if;
+                        output_word <= sample_memory(memory_address);
+                        phase <= emit_hold;
+
+                    when emit_hold =>
+                        if ctor_outputready then
+                            if emit_index = SAMPLES - 1 then
+                                emit_index <= 0;
+                                phase <= load_frame;
+                            else
+                                emit_index <= emit_index + 1;
+                                phase <= emit_read;
+                            end if;
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process;
+end;

@@ -1,0 +1,34 @@
+[project]
+name = "Livt.Signal"
+version = "0.1.0"
+path = "src"
+outdir = "out"
+
+[tests]
+path = "tests"
+components = [
+    "Q15SampleEncodingTest",
+    "Q15SampleDelayTest",
+    "Q15SampleFifoTest",
+    "Q15SampleFlowControlTest",
+    "MovingStatisticsTest",
+    "FirQ15ContractTest",
+    "FirQ15Test",
+    "BiquadQ15Test",
+    "WindowQ15Test",
+    "CicQ15Test",
+    "SequentialFftQ15Test",
+    "SequentialFftRecoveryTest",
+    "OscillatorMixerQ15Test"
+]
+
+[dependencies]
+Livt.Base = "1.2.0"
+Livt.Math = "1.6.0"
+Livt.Collections = "1.4.1"
+
+[build.debug]
+warnings = ["all"]
+
+[build.release]
+warnings = ["all"]

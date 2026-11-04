@@ -1,0 +1,26 @@
+namespace Livt.Signal.RateChange
+
+/**
+ * Native comb, zero-insertion, and registered-integrator CIC interpolation core.
+ */
+@Opaque
+component CicInterpolatorQ15PipelinePrimitive
+{
+	// Native stream and datapath ports used by the public wrapper.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputSample: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	/**
+	 * Configures rate, stage count, differential delay, and output scaling.
+	 */
+	new(rateShape: logic[], stageShape: logic[], delayShape: logic[],
+		widthShape: logic[], outputShift: int) {}
+}

@@ -1,0 +1,52 @@
+namespace Livt.Signal.Window
+
+using Livt.Signal.Stream
+
+/**
+ * Arbitrary fixed-coefficient Q1.15 window with one result per sample.
+ */
+component WindowQ15<SAMPLES: int>
+{
+	static assert SAMPLES > 0, "window length must be positive"
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 2
+	public const CAPACITY: int = 2
+	public const MULTIPLIER_COUNT: int = 1
+
+	// Borrowed streams, retained coefficient table, and the owned datapath.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	coefficients: int[SAMPLES]
+	primitive: WindowQ15PipelinePrimitive
+
+	/**
+	 * Binds borrowed endpoints and exactly SAMPLES fixed Q1.15 coefficients.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream,
+		coefficients: const int[SAMPLES])
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		this.coefficients = coefficients
+		primitive = new WindowQ15PipelinePrimitive(this.coefficients)
+	}
+
+	/**
+	 * Connects the fixed coefficient-table primitive to the borrowed endpoints.
+	 */
+	process Drive[]()
+	{
+		primitive.inputValid = inputStream.valid
+		primitive.inputSample = inputStream.sample
+		primitive.inputFirst = inputStream.first
+		primitive.inputLast = inputStream.last
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.inputReady
+		outputStream.valid = primitive.outputValid
+		outputStream.sample = primitive.outputSample
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+	}
+}

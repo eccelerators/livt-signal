@@ -1,0 +1,96 @@
+namespace Livt.Signal.Statistics
+
+using Livt.Signal.Stream
+
+/**
+ * Exact full-window moving sum for unscaled signed-16 samples.
+ */
+component MovingSumInt16<WINDOW_SIZE: int = 16>
+{
+	static assert WINDOW_SIZE >= 1 && WINDOW_SIZE <= 65535, "window size must be 1..65535"
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 0
+	public const CAPACITY: int = 0
+	const SUM_BITS: int = 16 + Bits.RequiredFor(WINDOW_SIZE - 1) - (1 / WINDOW_SIZE)
+
+	// Borrowed streams for accepted samples and full-window results.
+	inputStream: IInt16SampleStream
+	outputStream: IInt32SampleStream
+
+	// Circular sample storage and its running-window position and sum.
+	@Memory(Style = MemoryStyle.Auto)
+	@UninitializedStorage
+	samples: logic[WINDOW_SIZE, 16]
+
+	count: int
+	pointer: int
+	sum: logic[SUM_BITS]
+
+	// Observable window occupancy and readiness.
+	public fillCount: out int
+	public windowFull: out bool
+
+	/**
+	 * Binds borrowed streams to storage owned by this fixed-size moving window.
+	 */
+	new(inputStream: IInt16SampleStream, outputStream: flip IInt32SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+	}
+
+	/**
+	 * Offers a result for each accepted sample once the complete window is full.
+	 */
+	process Drive[]()
+	{
+		var incoming = inputStream.sample as int
+		var outgoing = 0
+
+		if (count == WINDOW_SIZE) {
+			outgoing = samples[pointer] as int
+		}
+
+		var producesResult = inputStream.valid && count >= WINDOW_SIZE - 1
+		var canAdvance = !producesResult || outputStream.ready
+		inputStream.ready = this.context.rst == 0b0 && canAdvance
+		outputStream.sample = (sum as int) + incoming - outgoing
+		outputStream.valid = this.context.rst == 0b0 && producesResult
+		outputStream.first = inputStream.first
+		outputStream.last = inputStream.last
+		fillCount = count
+		windowFull = count == WINDOW_SIZE
+	}
+
+	/**
+	 * Retains the circular sample window and exact running sum.
+	 */
+	process Update()
+	{
+		state {
+			if (inputStream.valid && inputStream.ready) {
+				var incoming = inputStream.sample as int
+				var outgoing = 0
+
+				if (count == WINDOW_SIZE) {
+					outgoing = samples[pointer] as int
+				} else {
+					count++
+				}
+
+				samples[pointer] = inputStream.sample
+				sum = ((sum as int) + incoming - outgoing) as logic[SUM_BITS]
+
+				static if (WINDOW_SIZE > 1) {
+					if (pointer == WINDOW_SIZE - 1) {
+						pointer = 0
+					} else {
+						pointer++
+					}
+				}
+			}
+		}
+	}
+}

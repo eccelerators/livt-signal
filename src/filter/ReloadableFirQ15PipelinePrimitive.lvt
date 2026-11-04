@@ -1,0 +1,35 @@
+namespace Livt.Signal.Filter
+
+/**
+ * Native double-buffered FIR datapath shared by reloadable specializations.
+ */
+@Opaque
+component ReloadableFirQ15PipelinePrimitive
+{
+	// Native sample-stream ports used by the public wrapper.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputSample: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	// Runtime coefficient-bank loading and commit ports.
+	public writeIndex: in int
+	public writeCoefficient: in int
+	public writeValid: in bool
+	public writeReady: out bool
+	public commitValid: in bool
+	public commitReady: out bool
+	public configured: out bool
+
+	/**
+	 * Configures tap count and the runtime coefficient fixed-point format.
+	 */
+	new(shape: logic[], coefficientBits: int,
+		coefficientFractionBits: int) {}
+}

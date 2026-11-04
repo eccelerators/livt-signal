@@ -1,0 +1,169 @@
+namespace Livt.Signal.Statistics
+
+using Livt.Math.Arithmetic
+using Livt.Math.Statistics
+using Livt.Signal.Stream
+
+/**
+ * Exact full-window floor population variance for signed-16 samples.
+ */
+component MovingVarianceInt16<WINDOW_SIZE: int = 16>
+{
+	static assert WINDOW_SIZE >= 1 && WINDOW_SIZE <= 65535, "window size must be 1..65535"
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 66
+	public const CAPACITY: int = 66
+	const SUM_BITS: int = 16 + Bits.RequiredFor(WINDOW_SIZE - 1) - (1 / WINDOW_SIZE)
+
+	// Borrowed streams and the owned variance and division datapaths.
+	inputStream: IInt16SampleStream
+	outputStream: IUInt32SampleStream
+	prepare: PopulationVarianceNumeratorPipelinePrimitive
+	divider: UnsignedDivisionPipelinePrimitive
+
+	// Circular sample storage and exact running sum state.
+	@Memory(Style = MemoryStyle.Auto)
+	@UninitializedStorage
+	samples: logic[WINDOW_SIZE, 16]
+
+	count: int
+	pointer: int
+	sum: logic[SUM_BITS]
+	squareLow: uint
+	squareHigh: logic[14]
+
+	// Observable window occupancy and readiness.
+	public fillCount: out int
+	public windowFull: out bool
+
+	/**
+	 * Binds borrowed streams and owns the variance arithmetic pipeline.
+	 */
+	new(inputStream: IInt16SampleStream, outputStream: flip IUInt32SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		prepare = new PopulationVarianceNumeratorPipelinePrimitive()
+		divider = new UnsignedDivisionPipelinePrimitive()
+	}
+
+	/**
+	 * Forms the next population-variance numerator and connects its division.
+	 */
+	process Drive[]()
+	{
+		var incoming = inputStream.sample as int
+		var outgoing = 0
+
+		if (count == WINDOW_SIZE) {
+			outgoing = samples[pointer] as int
+		}
+
+		var nextSum = (sum as int) + incoming - outgoing
+		var incomingSquare = (incoming * incoming) as uint
+		var outgoingSquare = (outgoing * outgoing) as uint
+		var nextLow = squareLow
+		var nextHigh = squareHigh as uint
+
+		if (incomingSquare >= outgoingSquare) {
+			var increment = incomingSquare - outgoingSquare
+			nextLow = squareLow + increment
+
+			if (nextLow < squareLow) {
+				nextHigh++
+			}
+		} else {
+			var decrement = outgoingSquare - incomingSquare
+			nextLow = squareLow - decrement
+
+			if (squareLow < decrement) {
+				nextHigh--
+			}
+		}
+
+		var squareBits: logic[64] = 0
+		var tag: logic[64] = 0
+		squareBits[0: 32] = nextLow as logic[32]
+		squareBits[32: 46] = nextHigh as logic[14]
+
+		if (inputStream.first) {
+			tag[0] = 0b1
+		}
+
+		if (inputStream.last) {
+			tag[1] = 0b1
+		}
+
+		prepare.inputValid = inputStream.valid && count >= WINDOW_SIZE - 1
+		prepare.sum = nextSum
+		prepare.sumSquares = squareBits
+		prepare.count = WINDOW_SIZE
+		prepare.inputTag = tag
+		prepare.outputReady = divider.inputReady
+		divider.inputValid = prepare.outputValid
+		divider.dividend = prepare.numerator
+		divider.divisor = prepare.denominator
+		divider.inputTag = prepare.outputTag
+		divider.outputReady = outputStream.ready
+		inputStream.ready = this.context.rst == 0b0 && prepare.inputReady
+		outputStream.valid = this.context.rst == 0b0 && divider.outputValid
+		outputStream.sample = divider.quotient as uint
+		outputStream.first = divider.outputTag[0] == 0b1
+		outputStream.last = divider.outputTag[1] == 0b1
+		fillCount = count
+		windowFull = count == WINDOW_SIZE
+	}
+
+	/**
+	 * Retains the circular window, running sum, and running sum of squares.
+	 */
+	process Update()
+	{
+		state {
+			if (inputStream.valid && inputStream.ready) {
+				var incoming = inputStream.sample as int
+				var outgoing = 0
+
+				if (count == WINDOW_SIZE) {
+					outgoing = samples[pointer] as int
+				} else {
+					count++
+				}
+
+				sum = ((sum as int) + incoming - outgoing) as logic[SUM_BITS]
+				var incomingSquare = (incoming * incoming) as uint
+				var outgoingSquare = (outgoing * outgoing) as uint
+
+				if (incomingSquare >= outgoingSquare) {
+					var increment = incomingSquare - outgoingSquare
+					var previousLow = squareLow
+					squareLow = squareLow + increment
+
+					if (squareLow < previousLow) {
+						squareHigh = ((squareHigh as uint) + 1) as logic[14]
+					}
+				} else {
+					var decrement = outgoingSquare - incomingSquare
+					var previousLow = squareLow
+					squareLow = squareLow - decrement
+
+					if (previousLow < decrement) {
+						squareHigh = ((squareHigh as uint) - 1) as logic[14]
+					}
+				}
+
+				samples[pointer] = inputStream.sample
+
+				static if (WINDOW_SIZE > 1) {
+					if (pointer == WINDOW_SIZE - 1) {
+						pointer = 0
+					} else {
+						pointer++
+					}
+				}
+			}
+		}
+	}
+}

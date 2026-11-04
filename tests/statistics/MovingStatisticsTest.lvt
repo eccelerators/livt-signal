@@ -1,0 +1,57 @@
+namespace Livt.Signal.Statistics
+
+/**
+ * Verifies exact full-window results and marker alignment for all four statistics.
+ */
+@Test
+component MovingStatisticsTest
+{
+	fixture: MovingStatisticsFixture
+	extremes: MovingStatisticsExtremeFixture
+
+	new()
+	{
+		fixture = new MovingStatisticsFixture()
+		extremes = new MovingStatisticsExtremeFixture()
+	}
+
+	@Test
+	fn ComputesRollingResultsAtInitiationIntervalOne()
+	{
+		Simulation.Wait(400)
+		assert fixture.windowsFull
+		assert fixture.sumAccepted == 3
+		assert fixture.sum0 == 10
+		assert fixture.sum1 == 14
+		assert fixture.sum2 == 10
+		assert fixture.meanAccepted == 3
+		assert fixture.mean0 == 2
+		assert fixture.mean1 == 4
+		assert fixture.mean2 == 2
+		assert fixture.rmsAccepted == 3
+		assert fixture.rms0 == 2
+		assert fixture.rms1 == 3
+		assert fixture.rms2 == 3
+		assert fixture.varianceAccepted == 3
+		assert fixture.variance0 == 1
+		assert fixture.variance1 == 1
+		assert fixture.variance2 == 7
+		assert !fixture.firstResults
+		assert fixture.lastResults
+	}
+
+	/**
+	 * Covers capacity one and the complete signed-16 magnitude range.
+	 */
+	@Test
+	fn HandlesSignedExtremaAtWindowSizeOne()
+	{
+		Simulation.Wait(400)
+		assert extremes.rmsAccepted == 2
+		assert extremes.rms0 == 32768
+		assert extremes.rms1 == 32767
+		assert extremes.varianceAccepted == 2
+		assert extremes.variance0 == 0
+		assert extremes.variance1 == 0
+	}
+}

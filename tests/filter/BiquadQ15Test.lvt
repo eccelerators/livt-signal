@@ -1,0 +1,136 @@
+namespace Livt.Signal.Tests.Filter
+
+/**
+ * Verifies direct-form-I Q15 biquad arithmetic and stream behavior.
+ */
+@Test
+component BiquadQ15Test
+{
+	const FILTER_B: int[3] = [4096, 8192, 4096]
+	const FILTER_A: int[2] = [-8192, 4096]
+	const IMPULSE_VALUES: int[8] = [16384, 0, 0, 0, 0, 0, 0, 0]
+	const STEP_VALUES: int[12] = [8192, 8192, 8192, 8192, 8192, 8192,
+		8192, 8192, 8192, 8192, 8192, 8192]
+
+	const IDENTITY_B: int[3] = [16384, 0, 0]
+	const ZERO_A: int[2] = [0, 0]
+	const IDENTITY_VALUES: int[4] = [32767, -32768, 3, -3]
+
+	const HALF_B: int[3] = [1, 0, 0]
+	const ROUNDING_VALUES: int[4] = [1, 3, -1, -3]
+	const DOUBLE_B: int[3] = [2, 0, 0]
+	const SATURATION_VALUES: int[2] = [20000, -20000]
+
+	impulse: BiquadQ15VectorFixture<8>
+	step: BiquadQ15VectorFixture<12>
+	identity: BiquadQ15VectorFixture<4>
+	rounding: BiquadQ15VectorFixture<4, 2, 1>
+	saturation: BiquadQ15VectorFixture<2, 3, 0>
+	stalled: BiquadQ15VectorFixture<8>
+
+	new()
+	{
+		impulse = new BiquadQ15VectorFixture<8>(FILTER_B, FILTER_A,
+			IMPULSE_VALUES)
+		step = new BiquadQ15VectorFixture<12>(FILTER_B, FILTER_A,
+			STEP_VALUES)
+		identity = new BiquadQ15VectorFixture<4>(IDENTITY_B, ZERO_A,
+			IDENTITY_VALUES)
+		rounding = new BiquadQ15VectorFixture<4, 2, 1>(HALF_B, ZERO_A,
+			ROUNDING_VALUES)
+		saturation = new BiquadQ15VectorFixture<2, 3, 0>(DOUBLE_B, ZERO_A,
+			SATURATION_VALUES)
+		stalled = new BiquadQ15VectorFixture<8>(FILTER_B, FILTER_A,
+			IMPULSE_VALUES)
+	}
+
+	@Test
+	fn MatchesIndependentImpulseResponse()
+	{
+		impulse.outputReady = true
+		Simulation.Wait(40)
+		assert impulse.sourceAccepted == 8
+		assert impulse.accepted == 8
+		assert impulse.capturedSample0 == 4096
+		assert impulse.capturedSample1 == 10240
+		assert impulse.capturedSample2 == 8192
+		assert impulse.capturedSample3 == 1536
+		assert impulse.capturedSample4 == 0xFB00
+		assert impulse.capturedSample5 == 0xFC00
+		assert impulse.capturedSample6 == 0xFF40
+		assert impulse.capturedSample7 == 160
+		assert impulse.firstSeen
+		assert impulse.lastSeen
+	}
+
+	@Test
+	fn ProducesBoundedStepResponseAndPublishedTiming()
+	{
+		step.outputReady = true
+		Simulation.Wait(56)
+		assert step.sourceAccepted == 12
+		assert step.accepted == 12
+		assert step.capturedSample0 == 2048
+		assert step.capturedSample1 == 7168
+		assert step.capturedSample2 == 11264
+		assert step.capturedSample3 == 12032
+		assert step.capturedSample4 == 11392
+		assert step.capturedSample5 == 10880
+		assert step.capturedSample6 == 10784
+		assert step.capturedSample7 == 10864
+		assert step.capturedSample8 == 10928
+		assert step.capturedSample9 == 10940
+		assert step.capturedSample10 == 10930
+		assert step.capturedSample11 == 10922
+		assert step.GetInitiationInterval() == 1
+		assert step.GetNominalLatency() == 1
+		assert step.GetAccumulatorBits() == 35
+	}
+
+	@Test
+	fn SupportsBypassNearestEvenRoundingAndSaturation()
+	{
+		identity.outputReady = true
+		rounding.outputReady = true
+		saturation.outputReady = true
+		Simulation.Wait(32)
+		assert identity.accepted == 4
+		assert identity.capturedSample0 == 0x7FFF
+		assert identity.capturedSample1 == 0x8000
+		assert identity.capturedSample2 == 3
+		assert identity.capturedSample3 == 0xFFFD
+		assert rounding.accepted == 4
+		assert rounding.capturedSample0 == 0
+		assert rounding.capturedSample1 == 2
+		assert rounding.capturedSample2 == 0
+		assert rounding.capturedSample3 == 0xFFFE
+		assert saturation.accepted == 2
+		assert saturation.capturedSample0 == 0x7FFF
+		assert saturation.capturedSample1 == 0x8000
+	}
+
+	@Test
+	fn FreezesStateAndPendingOutputWhileStalled()
+	{
+		stalled.outputReady = false
+		Simulation.Wait(8)
+		assert stalled.outputValid
+		assert stalled.sourceAccepted == 1
+		assert stalled.accepted == 0
+
+		stalled.outputReady = true
+		Simulation.Wait(40)
+		assert stalled.sourceAccepted == 8
+		assert stalled.accepted == 8
+		assert stalled.capturedSample0 == 4096
+		assert stalled.capturedSample1 == 10240
+		assert stalled.capturedSample2 == 8192
+		assert stalled.capturedSample3 == 1536
+		assert stalled.capturedSample4 == 0xFB00
+		assert stalled.capturedSample5 == 0xFC00
+		assert stalled.capturedSample6 == 0xFF40
+		assert stalled.capturedSample7 == 160
+		assert stalled.firstSeen
+		assert stalled.lastSeen
+	}
+}

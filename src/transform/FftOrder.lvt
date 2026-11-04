@@ -1,0 +1,10 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Describes the logical index order at a finite-frame transform boundary.
+ */
+public enum FftOrder
+{
+	Natural
+	BitReversed
+}

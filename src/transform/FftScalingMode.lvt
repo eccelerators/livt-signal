@@ -1,0 +1,10 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Selects fixed compile-time scaling or a retained exponent per frame.
+ */
+public enum FftScalingMode
+{
+	FixedSchedule
+	BlockFloating
+}

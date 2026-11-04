@@ -1,0 +1,117 @@
+namespace Livt.Signal.Tests.Filter
+
+using Livt.Signal.Filter
+
+/**
+ * Exercises the fixed FIR coefficient-binding shape without implementing the filter.
+ * The sized constructor array is elaboration-time configuration for a fixed instance.
+ */
+component FirQ15CoefficientProbe<TAPS: int, COEFFICIENT_BITS: int = 16,
+	COEFFICIENT_FRACTION_BITS: int = 15>
+{
+	static assert TAPS > 0, "FIR tap count must be positive"
+	static assert COEFFICIENT_BITS >= 2 && COEFFICIENT_BITS <= 31,
+		"FIR coefficient width must be in 2..31"
+	static assert COEFFICIENT_FRACTION_BITS >= 0
+		&& COEFFICIENT_FRACTION_BITS < COEFFICIENT_BITS,
+		"FIR coefficient fractional bits must be in 0..COEFFICIENT_BITS-1"
+
+	public const PRODUCT_BITS: int = 16 + COEFFICIENT_BITS
+
+	// Fixed signed raw coefficients supplied by the owner.
+	coefficients: int[TAPS]
+
+	/**
+	 * Binds exactly TAPS coefficient encodings to this fixed instance.
+	 */
+	new(coefficients: const int[TAPS])
+	{
+		this.coefficients = coefficients
+	}
+
+	/**
+	 * Returns the coefficient encoding at index for contract verification.
+	 *
+	 * Requires: index in 0..TAPS-1.
+	 */
+	public fn Get(index: int) int
+	{
+		return coefficients[index]
+	}
+}
+
+/**
+ * Exercises the symmetric FIR specialization and its reduced multiplier count.
+ */
+component SymmetricFirQ15CoefficientProbe<TAPS: int, COEFFICIENT_BITS: int = 16,
+	COEFFICIENT_FRACTION_BITS: int = 15>
+{
+	static assert TAPS > 0, "Symmetric FIR tap count must be positive"
+
+	public const MULTIPLIER_COUNT: int = (TAPS + 1) / 2
+
+	base: FirQ15CoefficientProbe<TAPS, COEFFICIENT_BITS,
+		COEFFICIENT_FRACTION_BITS>
+
+	/**
+	 * Binds a coefficient list that is symmetric around its center tap.
+	 */
+	new(coefficients: const int[TAPS])
+	{
+		base = new FirQ15CoefficientProbe<TAPS, COEFFICIENT_BITS,
+			COEFFICIENT_FRACTION_BITS>(coefficients)
+	}
+
+	/**
+	 * Returns the coefficient encoding at index for contract verification.
+	 *
+	 * Requires: index in 0..TAPS-1.
+	 */
+	public fn Get(index: int) int
+	{
+		return base.Get(index)
+	}
+}
+
+@Test
+component FirQ15ContractTest
+{
+	// Symmetric three-tap Q1.15 example: 0.25, 0.5, 0.25.
+	const COEFFICIENTS: int[3] = [8192, 16384, 8192]
+
+	// One-tap Q2.14 example representing positive one exactly.
+	const UNITY_COEFFICIENT: int[1] = [16384]
+
+	// Symmetric 18-bit coefficient example with 16 fractional bits.
+	const PRECISE_COEFFICIENTS: int[3] = [16384, 32768, 16384]
+
+	probe: FirQ15CoefficientProbe<3>
+	unityProbe: FirQ15CoefficientProbe<1, 16, 14>
+	symmetricProbe: SymmetricFirQ15CoefficientProbe<3, 18, 16>
+
+	new()
+	{
+		probe = new FirQ15CoefficientProbe<3>(COEFFICIENTS)
+		unityProbe = new FirQ15CoefficientProbe<1, 16, 14>(UNITY_COEFFICIENT)
+		symmetricProbe = new SymmetricFirQ15CoefficientProbe<3, 18, 16>(
+			PRECISE_COEFFICIENTS)
+	}
+
+	@Test
+	fn BindsSizedQ15Constants()
+	{
+		assert probe.Get(0) == 8192
+		assert probe.Get(1) == 16384
+		assert probe.Get(2) == 8192
+	}
+
+	@Test
+	fn SupportsCoefficientFormatsAndSymmetry()
+	{
+		assert probe.PRODUCT_BITS == 32
+		assert unityProbe.Get(0) == 16384
+		assert symmetricProbe.MULTIPLIER_COUNT == 2
+		assert symmetricProbe.Get(0) == symmetricProbe.Get(2)
+		assert symmetricProbe.Get(1) == 32768
+	}
+}

@@ -1,0 +1,84 @@
+namespace Livt.Signal.Tests.Oscillator
+
+/**
+ * Verifies phase conventions, stalls, and real/complex Q1.15 mixing.
+ */
+@Test
+component OscillatorMixerQ15Test
+{
+	positive: CordicNcoFixture<16384>
+	negative: CordicNcoFixture<49152>
+	stalled: CordicNcoFixture<16384>
+	realMixer: RealMixerFixture
+	stalledMixer: RealMixerFixture
+	complexMixer: ComplexMixerFixture
+
+	new()
+	{
+		positive = new CordicNcoFixture<16384>()
+		negative = new CordicNcoFixture<49152>()
+		stalled = new CordicNcoFixture<16384>()
+		realMixer = new RealMixerFixture()
+		stalledMixer = new RealMixerFixture()
+		complexMixer = new ComplexMixerFixture()
+	}
+
+	@Test
+	fn GeneratesAndMixesStallCoherentQ15Samples()
+	{
+		positive.ready = true
+		negative.ready = true
+		realMixer.ready = true
+		stalledMixer.ready = false
+		complexMixer.ready = true
+		Simulation.Wait(300)
+
+		assert stalled.accepted == 0
+		assert stalled.phase == 0x0000
+		assert stalledMixer.accepted == 0
+		assert stalledMixer.sourceAccepted == 1
+		assert stalledMixer.oscillatorAccepted == 1
+
+		stalledMixer.ready = true
+		stalled.ready = true
+		Simulation.Wait(1000)
+
+		assert positive.accepted == 4
+		assert positive.GetReal(0) >= 32763
+		AssertWithin(positive.GetImag(0), 0, 4)
+		AssertWithin(positive.GetReal(1), 0, 4)
+		assert positive.GetImag(1) >= 32763
+		assert positive.GetReal(2) <= -32764
+		AssertWithin(positive.GetImag(2), 0, 4)
+		AssertWithin(positive.GetReal(3), 0, 4)
+		assert positive.GetImag(3) <= -32764
+		assert positive.phase == 0x0000
+
+		assert negative.GetImag(1) <= -32764
+		assert negative.GetImag(3) >= 32763
+		assert negative.phase == 0x0000
+		assert stalled.accepted == 4
+
+		assert realMixer.accepted == 2
+		assert realMixer.GetReal(0) >= 16383
+		assert realMixer.GetImag(0) == 0
+		assert realMixer.GetReal(1) == 0
+		assert realMixer.GetImag(1) >= 16383
+		assert realMixer.FirstSeen()
+		assert realMixer.LastSeen()
+		assert stalledMixer.accepted == 2
+
+		assert complexMixer.accepted >= 1
+		assert complexMixer.GetReal() <= -16383
+		assert complexMixer.GetImag() >= 16383
+	}
+
+	fn AssertWithin(actual: int, expected: int, tolerance: int)
+	{
+		var difference = actual - expected
+
+		if (difference < 0) { difference = 0 - difference }
+
+		assert difference <= tolerance
+	}
+}

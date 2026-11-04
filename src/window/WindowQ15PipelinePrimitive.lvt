@@ -1,0 +1,25 @@
+namespace Livt.Signal.Window
+
+/**
+ * Native fixed-table Q1.15 window multiplier with frame-position tracking.
+ */
+@Opaque
+component WindowQ15PipelinePrimitive
+{
+	// Native stream and coefficient-table datapath ports.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputSample: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	/**
+	 * Configures the fixed Q1.15 coefficient table used for complete frames.
+	 */
+	new(coefficients: int[]) {}
+}

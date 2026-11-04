@@ -1,0 +1,325 @@
+namespace Livt.Signal.Tests.RateChange
+
+using Livt.Signal.RateChange
+using Livt.Signal.Stream
+
+/**
+ * Emits a fixed Q1.15 vector while honoring valid/ready backpressure.
+ */
+component CicQ15VectorSource<COUNT: int>
+{
+	stream: IQ15SampleStream
+	values: int[COUNT]
+	index: int
+	public accepted: int
+
+	new(stream: flip IQ15SampleStream, values: const int[COUNT])
+	{
+		this.stream = stream
+		this.values = values
+	}
+
+	process Send()
+	{
+		state Emit {
+			stream.sample = values[index] as logic[16]
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = index == COUNT - 1
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == COUNT - 1) {
+					goto Idle
+				} else {
+					index++
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Emit
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Retains a bounded CIC output vector and its frame markers.
+ */
+component CicQ15VectorObserver<COUNT: int>
+{
+	stream: IQ15SampleStream
+	public ready: in bool
+	public valid: out bool
+	public accepted: int
+	public firstSeen: bool
+	public lastSeen: bool
+	public capturedSample0: logic[16]
+	public capturedSample1: logic[16]
+	public capturedSample2: logic[16]
+	public capturedSample3: logic[16]
+	public capturedSample4: logic[16]
+	public capturedSample5: logic[16]
+	public capturedSample6: logic[16]
+	public capturedSample7: logic[16]
+
+	new(stream: IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Observe[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready
+		valid = stream.valid
+	}
+
+	process Capture()
+	{
+		state {
+			if (stream.valid && stream.ready) {
+				if (accepted == 0) {
+					capturedSample0 = stream.sample
+				} elif (accepted == 1) {
+					capturedSample1 = stream.sample
+				} elif (accepted == 2) {
+					capturedSample2 = stream.sample
+				} elif (accepted == 3) {
+					capturedSample3 = stream.sample
+				} elif (accepted == 4) {
+					capturedSample4 = stream.sample
+				} elif (accepted == 5) {
+					capturedSample5 = stream.sample
+				} elif (accepted == 6) {
+					capturedSample6 = stream.sample
+				} elif (accepted == 7) {
+					capturedSample7 = stream.sample
+				}
+
+				if (accepted == 0 && stream.first) {
+					firstSeen = true
+				}
+
+				if (accepted == COUNT - 1 && stream.last) {
+					lastSeen = true
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Fixed-vector decimator harness with observable alignment diagnostics.
+ */
+component CicDecimatorQ15Fixture<INPUT_COUNT: int, OUTPUT_COUNT: int,
+	RATE: int = 2, STAGES: int = 1, DIFFERENTIAL_DELAY: int = 1,
+	OUTPUT_SHIFT: int = 1>
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: CicQ15VectorSource<INPUT_COUNT>
+	decimator: CicDecimatorQ15<RATE, STAGES, DIFFERENTIAL_DELAY, OUTPUT_SHIFT>
+	observer: CicQ15VectorObserver<OUTPUT_COUNT>
+
+	public outputReady: in bool
+	public outputValid: out bool
+	public sourceAccepted: out int
+	public accepted: out int
+	public firstSeen: out bool
+	public lastSeen: out bool
+	public alignmentErrorSeen: bool
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+
+	new(values: const int[INPUT_COUNT])
+	{
+		source = new CicQ15VectorSource<INPUT_COUNT>(inputStream, values)
+		decimator = new CicDecimatorQ15<RATE, STAGES, DIFFERENTIAL_DELAY,
+			OUTPUT_SHIFT>(inputStream, outputStream)
+		observer = new CicQ15VectorObserver<OUTPUT_COUNT>(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = outputReady
+		outputValid = observer.valid
+		sourceAccepted = source.accepted
+		accepted = observer.accepted
+		firstSeen = observer.firstSeen
+		lastSeen = observer.lastSeen
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+	}
+
+	process WatchAlignment()
+	{
+		state {
+			if (decimator.frameAlignmentError) {
+				alignmentErrorSeen = true
+			}
+		}
+	}
+
+	public fn GetAccumulatorBits() int
+	{
+		return decimator.ACCUMULATOR_BITS
+	}
+
+	public fn GetInputInitiationInterval() int
+	{
+		return decimator.INPUT_INITIATION_INTERVAL
+	}
+
+	public fn GetOutputInitiationInterval() int
+	{
+		return decimator.OUTPUT_INITIATION_INTERVAL
+	}
+}
+
+/**
+ * Fixed-vector interpolator harness with caller-controlled output capacity.
+ */
+component CicInterpolatorQ15Fixture<INPUT_COUNT: int, OUTPUT_COUNT: int,
+	RATE: int = 2, STAGES: int = 1, DIFFERENTIAL_DELAY: int = 1,
+	OUTPUT_SHIFT: int = 0>
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: CicQ15VectorSource<INPUT_COUNT>
+	interpolator: CicInterpolatorQ15<RATE, STAGES, DIFFERENTIAL_DELAY,
+		OUTPUT_SHIFT>
+	observer: CicQ15VectorObserver<OUTPUT_COUNT>
+
+	public outputReady: in bool
+	public outputValid: out bool
+	public sourceAccepted: out int
+	public accepted: out int
+	public firstSeen: out bool
+	public lastSeen: out bool
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+	public capturedSample4: out logic[16]
+	public capturedSample5: out logic[16]
+
+	new(values: const int[INPUT_COUNT])
+	{
+		source = new CicQ15VectorSource<INPUT_COUNT>(inputStream, values)
+		interpolator = new CicInterpolatorQ15<RATE, STAGES,
+			DIFFERENTIAL_DELAY, OUTPUT_SHIFT>(inputStream, outputStream)
+		observer = new CicQ15VectorObserver<OUTPUT_COUNT>(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = outputReady
+		outputValid = observer.valid
+		sourceAccepted = source.accepted
+		accepted = observer.accepted
+		firstSeen = observer.firstSeen
+		lastSeen = observer.lastSeen
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+		capturedSample4 = observer.capturedSample4
+		capturedSample5 = observer.capturedSample5
+	}
+
+	public fn GetAccumulatorBits() int
+	{
+		return interpolator.ACCUMULATOR_BITS
+	}
+
+	public fn GetInputInitiationInterval() int
+	{
+		return interpolator.INPUT_INITIATION_INTERVAL
+	}
+
+	public fn GetOutputInitiationInterval() int
+	{
+		return interpolator.OUTPUT_INITIATION_INTERVAL
+	}
+}
+
+/**
+ * Instantiates the public CIC defaults so their elaborated contract is tested.
+ */
+component CicQ15DefaultContractFixture
+{
+	const DECIMATOR_VALUES: int[2] = [0, 0]
+	const INTERPOLATOR_VALUES: int[1] = [0]
+
+	decimatorInput: IQ15SampleStream
+	decimatorOutput: IQ15SampleStream
+	interpolatorInput: IQ15SampleStream
+	interpolatorOutput: IQ15SampleStream
+	decimatorSource: CicQ15VectorSource<2>
+	decimatorObserver: CicQ15VectorObserver<1>
+	interpolatorSource: CicQ15VectorSource<1>
+	interpolatorObserver: CicQ15VectorObserver<2>
+	decimator: CicDecimatorQ15<2>
+	interpolator: CicInterpolatorQ15<2>
+
+	new()
+	{
+		decimatorSource = new CicQ15VectorSource<2>(decimatorInput,
+			DECIMATOR_VALUES)
+		decimator = new CicDecimatorQ15<2>(decimatorInput, decimatorOutput)
+		decimatorObserver = new CicQ15VectorObserver<1>(decimatorOutput)
+		interpolatorSource = new CicQ15VectorSource<1>(interpolatorInput,
+			INTERPOLATOR_VALUES)
+		interpolator = new CicInterpolatorQ15<2>(interpolatorInput,
+			interpolatorOutput)
+		interpolatorObserver = new CicQ15VectorObserver<2>(interpolatorOutput)
+	}
+
+	process TieOff[]()
+	{
+		decimatorObserver.ready = true
+		interpolatorObserver.ready = true
+	}
+
+	public fn GetDecimatorBits() int
+	{
+		return decimator.ACCUMULATOR_BITS
+	}
+
+	public fn GetDecimatorShift() int
+	{
+		return decimator.AUTOMATIC_OUTPUT_SHIFT
+	}
+
+	public fn GetInterpolatorBits() int
+	{
+		return interpolator.ACCUMULATOR_BITS
+	}
+
+	public fn GetInterpolatorShift() int
+	{
+		return interpolator.AUTOMATIC_OUTPUT_SHIFT
+	}
+}

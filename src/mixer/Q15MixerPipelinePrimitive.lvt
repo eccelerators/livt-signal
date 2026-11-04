@@ -1,0 +1,31 @@
+namespace Livt.Signal.Mixer
+
+/**
+ * Native one-stage Q1.15 real/complex mixer with paired stream acceptance.
+ */
+@Opaque
+component Q15MixerPipelinePrimitive
+{
+	// Native paired-input and complex-output stream ports.
+	public sampleValid: in bool
+	public sampleReady: out bool
+	public sampleReal: in logic[16]
+	public sampleImag: in logic[16]
+	public sampleFirst: in bool
+	public sampleLast: in bool
+	public oscillatorValid: in bool
+	public oscillatorReady: out bool
+	public oscillatorReal: in logic[16]
+	public oscillatorImag: in logic[16]
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputReal: out logic[16]
+	public outputImag: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	/**
+	 * Selects a real or complex sample input at elaboration time.
+	 */
+	new(realInput: bool) {}
+}

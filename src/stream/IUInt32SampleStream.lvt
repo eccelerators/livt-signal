@@ -1,0 +1,14 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Unsigned-32 samples with valid/ready flow control and frame markers.
+ */
+interface IUInt32SampleStream
+{
+	// Unsigned payload, transfer handshake, and non-empty-frame boundaries.
+	sample: in uint
+	valid: in bool
+	first: in bool
+	last: in bool
+	ready: out bool
+}

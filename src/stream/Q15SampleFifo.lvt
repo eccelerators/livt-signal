@@ -1,0 +1,69 @@
+namespace Livt.Signal.Stream
+
+using Livt.Collections
+
+/**
+ * Buffers complete Q1.15 stream tokens in a packed single-clock FIFO.
+ * Capacity is measured in samples. The oldest token is visible without a pop;
+ * a transfer removes it only when valid and ready are both true at an active edge.
+ */
+component Q15SampleFifo<CAPACITY: int = 16>
+{
+	static assert CAPACITY > 0, "Q15 sample FIFO capacity must be positive"
+
+	// Borrowed input and output stream endpoints.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+
+	// Packed FIFO request and response signals: sample[15:0], first[16], last[17].
+	fifo: Fifo<logic[18], CAPACITY>
+	push: bool
+	pushData: logic[18]
+	pop: bool
+	pushAccepted: bool
+	popAccepted: bool
+	popData: logic[18]
+	count: int
+	space: int
+	clear: bool
+
+	/**
+	 * Binds a consumer-side input and producer-side output in one clock/reset context.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		fifo = new Fifo<logic[18], CAPACITY>(clear, push, pushData, pop,
+			pushAccepted, popAccepted, popData, count, space)
+	}
+
+	/**
+	 * Packs incoming tokens and maps FIFO acceptance to valid/ready flow control.
+	 */
+	process Drive[]()
+	{
+		clear = false
+		push = inputStream.valid
+		pop = outputStream.ready
+		pushData = inputStream.sample as logic[18]
+
+		if (inputStream.first) {
+			pushData[16] = 0b1
+		} else {
+			pushData[16] = 0b0
+		}
+
+		if (inputStream.last) {
+			pushData[17] = 0b1
+		} else {
+			pushData[17] = 0b0
+		}
+
+		inputStream.ready = pushAccepted
+		outputStream.valid = this.context.rst == 0b0 && count > 0
+		outputStream.sample = popData[0: 16]
+		outputStream.first = popData[16] == 0b1
+		outputStream.last = popData[17] == 0b1
+	}
+}

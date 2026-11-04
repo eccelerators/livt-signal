@@ -1,0 +1,26 @@
+namespace Livt.Signal.Tests.Transform
+
+/**
+ * Verifies that malformed input is discarded before the next complete frame.
+ */
+@Test
+component SequentialFftRecoveryTest
+{
+	fixture: SequentialFftRecoveryFixture
+
+	new()
+	{
+		fixture = new SequentialFftRecoveryFixture()
+	}
+
+	@Test
+	fn RecoversAtTheNextFirstMarker()
+	{
+		fixture.ready = true
+		Simulation.Wait(300)
+
+		assert fixture.errorSeen
+		assert fixture.accepted == 8
+		assert fixture.mismatches == 0
+	}
+}

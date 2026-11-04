@@ -1,0 +1,139 @@
+namespace Livt.Signal.Tests.Filter
+
+/**
+ * Verifies fixed Q1.15 convolution, marker alignment, and output stalling.
+ */
+@Test
+component FirQ15Test
+{
+	const UNITY_COEFFICIENT: int[1] = [16384]
+	const WIDE_UNITY_COEFFICIENT: int[1] = [65536]
+	const HALF_COEFFICIENT: int[1] = [1]
+	const DOUBLE_COEFFICIENT: int[1] = [2]
+	const UNITY_VALUES: int[2] = [32767, -32768]
+	const ROUNDING_VALUES: int[4] = [1, 3, -1, -3]
+	const SATURATION_VALUES: int[2] = [20000, -20000]
+	const REFERENCE_COEFFICIENTS: int[3] = [16384, 8192, -8192]
+	const REFERENCE_VALUES: int[4] = [1000, -2000, 3000, -4000]
+
+	functional: FirQ15Fixture
+	stalled: FirQ15Fixture
+	symmetric: SymmetricFirQ15Fixture
+	unity: FixedFirQ15VectorFixture<1, 2, 16, 14>
+	wide: FixedFirQ15VectorFixture<1, 2, 18, 16>
+	rounding: FixedFirQ15VectorFixture<1, 4, 2, 1>
+	saturation: FixedFirQ15VectorFixture<1, 2, 3, 0>
+	reference: FixedFirQ15VectorFixture<3, 4>
+	reloadable: ReloadableFirQ15Fixture
+	atomicReload: ReloadableFirQ15AtomicFixture
+
+	new()
+	{
+		functional = new FirQ15Fixture()
+		stalled = new FirQ15Fixture()
+		symmetric = new SymmetricFirQ15Fixture()
+		unity = new FixedFirQ15VectorFixture<1, 2, 16, 14>(
+			UNITY_COEFFICIENT, UNITY_VALUES)
+		wide = new FixedFirQ15VectorFixture<1, 2, 18, 16>(
+			WIDE_UNITY_COEFFICIENT, UNITY_VALUES)
+		rounding = new FixedFirQ15VectorFixture<1, 4, 2, 1>(
+			HALF_COEFFICIENT, ROUNDING_VALUES)
+		saturation = new FixedFirQ15VectorFixture<1, 2, 3, 0>(
+			DOUBLE_COEFFICIENT, SATURATION_VALUES)
+		reference = new FixedFirQ15VectorFixture<3, 4>(
+			REFERENCE_COEFFICIENTS, REFERENCE_VALUES)
+		reloadable = new ReloadableFirQ15Fixture()
+		atomicReload = new ReloadableFirQ15AtomicFixture()
+	}
+
+	@Test
+	fn FiltersImpulseAndPreservesFrameMarkers()
+	{
+		functional.outputReady = true
+		Simulation.Wait(24)
+		assert functional.sourceAccepted == 4
+		assert functional.accepted == 4
+		assert functional.capturedSample0 == 8192
+		assert functional.capturedSample1 == 16384
+		assert functional.capturedSample2 == 8192
+		assert functional.capturedSample3 == 0
+		assert functional.capturedFirst0
+		assert functional.capturedLast3
+	}
+
+	@Test
+	fn HoldsPendingOutputWhileBlocked()
+	{
+		stalled.outputReady = false
+		Simulation.Wait(12)
+		assert stalled.outputValid
+		assert stalled.accepted == 0
+
+		stalled.outputReady = true
+		Simulation.Wait(20)
+		assert stalled.sourceAccepted == 4
+		assert stalled.accepted == 4
+		assert stalled.capturedSample0 == 8192
+		assert stalled.capturedSample1 == 16384
+		assert stalled.capturedSample2 == 8192
+		assert stalled.capturedSample3 == 0
+		assert stalled.capturedFirst0
+		assert stalled.capturedLast3
+	}
+
+	@Test
+	fn SupportsCoefficientFormatsRoundingAndSaturation()
+	{
+		Simulation.Wait(28)
+		assert unity.accepted == 2
+		assert unity.capturedSample0 == 0x7FFF
+		assert unity.capturedSample1 == 0x8000
+		assert wide.accepted == 2
+		assert wide.capturedSample0 == 0x7FFF
+		assert wide.capturedSample1 == 0x8000
+		assert rounding.accepted == 4
+		assert rounding.capturedSample0 == 0
+		assert rounding.capturedSample1 == 2
+		assert rounding.capturedSample2 == 0
+		assert rounding.capturedSample3 == 0xFFFE
+		assert saturation.accepted == 2
+		assert saturation.capturedSample0 == 0x7FFF
+		assert saturation.capturedSample1 == 0x8000
+		assert rounding.capturedFirst0
+		assert rounding.capturedLast3
+		assert reference.accepted == 4
+		assert reference.capturedSample0 == 500
+		assert reference.capturedSample1 == 0xFD12
+		assert reference.capturedSample2 == 750
+		assert reference.capturedSample3 == 0xFD12
+	}
+
+	@Test
+	fn ImplementsSymmetricAndReloadableImpulseResponses()
+	{
+		Simulation.Wait(80)
+		assert symmetric.sourceAccepted == 4
+		assert symmetric.accepted == 4
+		assert symmetric.capturedSample0 == 8192
+		assert symmetric.capturedSample1 == 16384
+		assert symmetric.capturedSample2 == 8192
+		assert symmetric.capturedSample3 == 0
+		assert reloadable.configured
+		assert reloadable.commits == 1
+		assert reloadable.sourceAccepted == 4
+		assert reloadable.accepted == 4
+		assert reloadable.capturedSample0 == 8192
+		assert reloadable.capturedSample1 == 16384
+		assert reloadable.capturedSample2 == 8192
+		assert reloadable.capturedSample3 == 0
+		assert atomicReload.sawBlockedBeforeConfiguration
+		assert atomicReload.sawCommitBlockedByWrite
+		assert atomicReload.configured
+		assert atomicReload.commits == 2
+		assert atomicReload.acceptedInputs == 3
+		assert atomicReload.acceptedOutputs == 3
+		assert atomicReload.capturedSample0 == 1000
+		assert atomicReload.capturedSample1 == 2000
+		assert atomicReload.capturedSample2 == 0xF448
+	}
+}

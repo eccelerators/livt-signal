@@ -1,0 +1,368 @@
+namespace Livt.Signal.Tests.Oscillator
+
+using Livt.Signal.Mixer
+using Livt.Signal.Oscillator
+using Livt.Signal.Stream
+using Livt.Signal.Transform
+
+/**
+ * Captures four complex Q1.15 tokens from a caller-controlled stream.
+ */
+component ComplexCapture4
+{
+	stream: IComplexSampleStream<logic[16]>
+	public ready: in bool
+	public accepted: int
+	real0: logic[16]
+	real1: logic[16]
+	real2: logic[16]
+	real3: logic[16]
+	imag0: logic[16]
+	imag1: logic[16]
+	imag2: logic[16]
+	imag3: logic[16]
+	public firstSeen: bool
+	public lastSeen: bool
+
+	new(stream: IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	process Drive[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready && accepted < 4
+	}
+
+	process Capture()
+	{
+		state {
+			if (stream.valid && stream.ready && accepted < 4) {
+				if (accepted == 0) {
+					real0 = stream.real
+					imag0 = stream.imag
+				} else {
+					if (accepted == 1) {
+						real1 = stream.real
+						imag1 = stream.imag
+					} else {
+						if (accepted == 2) {
+							real2 = stream.real
+							imag2 = stream.imag
+						} else {
+							real3 = stream.real
+							imag3 = stream.imag
+						}
+					}
+				}
+
+				if (stream.first) { firstSeen = true }
+
+				if (stream.last) { lastSeen = true }
+
+				accepted++
+			}
+		}
+	}
+
+	public fn GetReal(index: int) int
+	{
+		if (index == 0) { return real0 as int }
+
+		if (index == 1) { return real1 as int }
+
+		if (index == 2) { return real2 as int }
+
+		return real3 as int
+	}
+
+	public fn GetImag(index: int) int
+	{
+		if (index == 0) { return imag0 as int }
+
+		if (index == 1) { return imag1 as int }
+
+		if (index == 2) { return imag2 as int }
+
+		return imag3 as int
+	}
+}
+
+/**
+ * Generates one CORDIC NCO sequence and retains its first four samples.
+ */
+component CordicNcoFixture<INCREMENT: int, INITIAL_PHASE: int = 0>
+{
+	stream: IComplexSampleStream<logic[16]>
+	nco: CordicNcoQ15<16, INITIAL_PHASE>
+	observer: ComplexCapture4
+	public ready: in bool
+	public accepted: out int
+	public phase: out logic[16]
+
+	new()
+	{
+		nco = new CordicNcoQ15<16, INITIAL_PHASE>(stream)
+		observer = new ComplexCapture4(stream)
+	}
+
+	process Connect[]()
+	{
+		nco.phaseIncrement = INCREMENT as logic[16]
+		observer.ready = ready
+		accepted = observer.accepted
+		phase = nco.phase
+	}
+
+	public fn GetReal(index: int) int
+	{
+		return observer.GetReal(index)
+	}
+
+	public fn GetImag(index: int) int
+	{
+		return observer.GetImag(index)
+	}
+}
+
+/**
+ * Emits two real half-scale samples as one framed transaction.
+ */
+component RealPairSource
+{
+	stream: IQ15SampleStream
+	index: int
+	public accepted: int
+
+	new(stream: flip IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Send()
+	{
+		state Offer {
+			stream.sample = 16384 as logic[16]
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = index == 1
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == 1) { goto Idle } else {
+					index++;
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false;
+			stream.first = false;
+			stream.last = false;
+			goto Offer
+		}
+
+		state Idle {
+			stream.valid = false;
+			stream.first = false;
+			stream.last = false;
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Emits two quarter-turn oscillator values.
+ */
+component QuarterTurnPairSource
+{
+	stream: IComplexSampleStream<logic[16]>
+	index: int
+	public accepted: int
+
+	new(stream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	process Send()
+	{
+		state Offer {
+			if (index == 0) {
+				stream.real = 32767 as logic[16]
+				stream.imag = 0x0000
+			} else {
+				stream.real = 0x0000
+				stream.imag = 32767 as logic[16]
+			}
+
+			stream.valid = true
+			stream.first = false
+			stream.last = false
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == 1) { goto Idle } else {
+					index++;
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false;
+			goto Offer
+		}
+
+		state Idle {
+			stream.valid = false;
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Emits one constant complex sample as a one-token frame.
+ */
+component ComplexSingleSource<REAL: int, IMAG: int>
+{
+	stream: IComplexSampleStream<logic[16]>
+	public accepted: int
+
+	new(stream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	process Send()
+	{
+		state Offer {
+			stream.real = REAL as logic[16]
+			stream.imag = IMAG as logic[16]
+			stream.valid = true
+			stream.first = true
+			stream.last = true
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+				goto Idle
+			}
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Exercises the two-multiplier real-to-complex mixer.
+ */
+component RealMixerFixture
+{
+	input: IQ15SampleStream
+	oscillator: IComplexSampleStream<logic[16]>
+	output: IComplexSampleStream<logic[16]>
+	source: RealPairSource
+	oscillatorSource: QuarterTurnPairSource
+	mixer: RealMixerQ15
+	observer: ComplexCapture4
+	public ready: in bool
+	public accepted: out int
+	public sourceAccepted: out int
+	public oscillatorAccepted: out int
+
+	new()
+	{
+		source = new RealPairSource(input)
+		oscillatorSource = new QuarterTurnPairSource(oscillator)
+		mixer = new RealMixerQ15(input, oscillator, output)
+		observer = new ComplexCapture4(output)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = ready
+		accepted = observer.accepted
+		sourceAccepted = source.accepted
+		oscillatorAccepted = oscillatorSource.accepted
+	}
+
+	public fn GetReal(index: int) int
+	{
+		return observer.GetReal(index)
+	}
+
+	public fn GetImag(index: int) int
+	{
+		return observer.GetImag(index)
+	}
+
+	public fn FirstSeen() bool
+	{
+		return observer.firstSeen
+	}
+
+	public fn LastSeen() bool
+	{
+		return observer.lastSeen
+	}
+}
+
+/**
+ * Exercises the four-multiplier complex mixer with a quarter-turn rotation.
+ */
+component ComplexMixerFixture
+{
+	input: IComplexSampleStream<logic[16]>
+	oscillator: IComplexSampleStream<logic[16]>
+	output: IComplexSampleStream<logic[16]>
+	inputSource: ComplexSingleSource<16384, 16384>
+	oscillatorSource: ComplexSingleSource<0, 32767>
+	mixer: ComplexMixerQ15
+	observer: ComplexCapture4
+	public ready: in bool
+	public accepted: out int
+
+	new()
+	{
+		inputSource = new ComplexSingleSource<16384, 16384>(input)
+		oscillatorSource = new ComplexSingleSource<0, 32767>(oscillator)
+		mixer = new ComplexMixerQ15(input, oscillator, output)
+		observer = new ComplexCapture4(output)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = ready
+		accepted = observer.accepted
+	}
+
+	public fn GetReal() int
+	{
+		return observer.GetReal(0)
+	}
+
+	public fn GetImag() int
+	{
+		return observer.GetImag(0)
+	}
+}

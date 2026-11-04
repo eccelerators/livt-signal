@@ -1,0 +1,309 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Drives caller-controlled values onto the producer side of a Q1.15 stream.
+ */
+component Q15SampleTestDriver
+{
+	stream: IQ15SampleStream
+	public sample: in logic[16]
+	public valid: in bool
+	public first: in bool
+	public last: in bool
+	public ready: out bool
+
+	/**
+	 * Binds the test driver to a producer-side stream endpoint.
+	 */
+	new(stream: flip IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Forwards the caller-controlled token and observes downstream capacity.
+	 */
+	process Drive[]()
+	{
+		stream.sample = sample
+		stream.valid = valid
+		stream.first = first
+		stream.last = last
+		ready = stream.ready
+	}
+}
+
+/**
+ * Applies caller-controlled capacity and exposes the consumer-side token.
+ */
+component Q15SampleTestObserver
+{
+	stream: IQ15SampleStream
+	public ready: in bool
+	public sample: out logic[16]
+	public valid: out bool
+	public first: out bool
+	public last: out bool
+
+	// First four accepted tokens retained for ordering checks.
+	public accepted: int
+	public capturedSample0: logic[16]
+	public capturedSample1: logic[16]
+	public capturedSample2: logic[16]
+	public capturedSample3: logic[16]
+	public capturedFirst0: bool
+	public capturedLast3: bool
+
+	/**
+	 * Binds the test observer to a consumer-side stream endpoint.
+	 */
+	new(stream: IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Applies capacity and exposes the complete token without additional state.
+	 */
+	process Observe[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready
+		sample = stream.sample
+		valid = stream.valid
+		first = stream.first
+		last = stream.last
+	}
+
+	/**
+	 * Captures the first four accepted tokens for deterministic protocol tests.
+	 */
+	process Capture()
+	{
+		state {
+			if (stream.valid && stream.ready) {
+				if (accepted == 0) {
+					capturedSample0 = stream.sample
+					capturedFirst0 = stream.first
+				} elif (accepted == 1) {
+					capturedSample1 = stream.sample
+				} elif (accepted == 2) {
+					capturedSample2 = stream.sample
+				} elif (accepted == 3) {
+					capturedSample3 = stream.sample
+					capturedLast3 = stream.last
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Sends four known framed tokens with explicit idle gaps for FIFO verification.
+ */
+component Q15SampleFifoTestSource
+{
+	stream: IQ15SampleStream
+	public accepted: int
+
+	/**
+	 * Binds the stateful test producer to a producer-side stream endpoint.
+	 */
+	new(stream: flip IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Holds each token until acceptance and inserts one invalid cycle between tokens.
+	 */
+	process Send()
+	{
+		state First {
+			stream.sample = 0x8000
+			stream.valid = true
+			stream.first = true
+			stream.last = false
+
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+				goto GapAfterFirst
+			}
+		}
+
+		state GapAfterFirst {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Second
+		}
+
+		state Second {
+			stream.sample = 0xFFFF
+			stream.valid = true
+			stream.first = false
+			stream.last = false
+
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+				goto GapAfterSecond
+			}
+		}
+
+		state GapAfterSecond {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Third
+		}
+
+		state Third {
+			stream.sample = 0x0000
+			stream.valid = true
+			stream.first = false
+			stream.last = false
+
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+				goto GapAfterThird
+			}
+		}
+
+		state GapAfterThird {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Last
+		}
+
+		state Last {
+			stream.sample = 0x7FFF
+			stream.valid = true
+			stream.first = false
+			stream.last = true
+
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+				goto Idle
+			}
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Exposes a caller-driven three-stage Q1.15 delay for protocol tests.
+ */
+component Q15SampleDelayFixture
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	driver: Q15SampleTestDriver
+	delay: Q15SampleDelay<3>
+	observer: Q15SampleTestObserver
+
+	public inputSample: in logic[16]
+	public inputValid: in bool
+	public inputFirst: in bool
+	public inputLast: in bool
+	public inputReady: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputValid: out bool
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	/**
+	 * Creates and structurally connects the driver, delay, and observer.
+	 */
+	new()
+	{
+		driver = new Q15SampleTestDriver(inputStream)
+		delay = new Q15SampleDelay<3>(inputStream, outputStream)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	/**
+	 * Connects caller controls and publishes both handshake endpoints.
+	 */
+	process Connect[]()
+	{
+		driver.sample = inputSample
+		driver.valid = inputValid
+		driver.first = inputFirst
+		driver.last = inputLast
+		inputReady = driver.ready
+		observer.ready = outputReady
+		outputSample = observer.sample
+		outputValid = observer.valid
+		outputFirst = observer.first
+		outputLast = observer.last
+	}
+}
+
+/**
+ * Exposes a caller-driven four-token Q1.15 FIFO for protocol tests.
+ */
+component Q15SampleFifoFixture
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: Q15SampleFifoTestSource
+	fifo: Q15SampleFifo<4>
+	observer: Q15SampleTestObserver
+
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputValid: out bool
+	public outputFirst: out bool
+	public outputLast: out bool
+	public accepted: out int
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+	public capturedFirst0: out bool
+	public capturedLast3: out bool
+	public sourceAccepted: out int
+
+	/**
+	 * Creates and structurally connects the driver, FIFO, and observer.
+	 */
+	new()
+	{
+		source = new Q15SampleFifoTestSource(inputStream)
+		fifo = new Q15SampleFifo<4>(inputStream, outputStream)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	/**
+	 * Connects caller controls and publishes both handshake endpoints.
+	 */
+	process Connect[]()
+	{
+		observer.ready = outputReady
+		outputSample = observer.sample
+		outputValid = observer.valid
+		outputFirst = observer.first
+		outputLast = observer.last
+		accepted = observer.accepted
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+		capturedFirst0 = observer.capturedFirst0
+		capturedLast3 = observer.capturedLast3
+		sourceAccepted = source.accepted
+	}
+}

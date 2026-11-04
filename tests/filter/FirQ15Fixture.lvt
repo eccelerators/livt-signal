@@ -1,0 +1,634 @@
+namespace Livt.Signal.Tests.Filter
+
+using Livt.Signal.Filter
+using Livt.Signal.Stream
+
+/**
+ * Emits one full-scale impulse followed by three zero samples.
+ */
+component FirQ15ImpulseSource
+{
+	stream: IQ15SampleStream
+	public accepted: int
+
+	new(stream: flip IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Send()
+	{
+		state Impulse {
+			stream.sample = 0x7FFF
+			stream.valid = true
+			stream.first = true
+			stream.last = false
+
+			if (stream.ready) {
+				accepted++
+				goto Gap1
+			}
+		}
+
+		state Gap1 {
+			stream.valid = false;
+			stream.first = false;
+			stream.last = false;
+			goto Zero1
+		}
+
+		state Zero1 {
+			stream.sample = 0
+			stream.valid = true
+			stream.first = false
+			stream.last = false
+
+			if (stream.ready) {
+				accepted++
+				goto Gap2
+			}
+		}
+
+		state Gap2 {
+			stream.valid = false;
+			stream.first = false;
+			stream.last = false;
+			goto Zero2
+		}
+
+		state Zero2 {
+			stream.sample = 0
+			stream.valid = true
+			stream.first = false
+			stream.last = false
+
+			if (stream.ready) {
+				accepted++
+				goto Gap3
+			}
+		}
+
+		state Gap3 {
+			stream.valid = false;
+			stream.first = false;
+			stream.last = false;
+			goto Zero3
+		}
+
+		state Zero3 {
+			stream.sample = 0
+			stream.valid = true
+			stream.first = false
+			stream.last = true
+
+			if (stream.ready) {
+				accepted++
+				goto Idle
+			}
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Caller-driven three-tap FIR fixture with retained output observations.
+ */
+component FirQ15Fixture
+{
+	const COEFFICIENTS: int[3] = [8192, 16384, 8192]
+
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: FirQ15ImpulseSource
+	filter: FirQ15<3>
+	observer: Q15SampleTestObserver
+
+	public outputReady: in bool
+	public outputValid: out bool
+	public accepted: out int
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+	public capturedFirst0: out bool
+	public capturedLast3: out bool
+	public sourceAccepted: out int
+
+	new()
+	{
+		source = new FirQ15ImpulseSource(inputStream)
+		filter = new FirQ15<3>(inputStream, outputStream, COEFFICIENTS)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = outputReady
+		outputValid = observer.valid
+		accepted = observer.accepted
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+		capturedFirst0 = observer.capturedFirst0
+		capturedLast3 = observer.capturedLast3
+		sourceAccepted = source.accepted
+	}
+}
+
+/**
+ * Same impulse harness using the multiplier-reduced symmetric architecture.
+ */
+component SymmetricFirQ15Fixture
+{
+	const COEFFICIENTS: int[3] = [8192, 16384, 8192]
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: FirQ15ImpulseSource
+	filter: SymmetricFirQ15<3>
+	observer: Q15SampleTestObserver
+	public accepted: out int
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+	public sourceAccepted: out int
+
+	new()
+	{
+		source = new FirQ15ImpulseSource(inputStream)
+		filter = new SymmetricFirQ15<3>(inputStream, outputStream, COEFFICIENTS)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = true
+		accepted = observer.accepted
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+		sourceAccepted = source.accepted
+	}
+}
+
+/**
+ * Emits an elaboration-time sample vector with an idle cycle between tokens.
+ */
+component FirQ15VectorSource<COUNT: int>
+{
+	stream: IQ15SampleStream
+	values: int[COUNT]
+	index: int
+	public accepted: int
+
+	new(stream: flip IQ15SampleStream, values: const int[COUNT])
+	{
+		this.stream = stream
+		this.values = values
+	}
+
+	process Send()
+	{
+		state Emit {
+			stream.sample = values[index] as logic[16]
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = index == COUNT - 1
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == COUNT - 1) {
+					goto Idle
+				} else {
+					index++
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Emit
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Generic fixed-filter fixture used for independent numeric vectors.
+ */
+component FixedFirQ15VectorFixture<TAPS: int, COUNT: int,
+	COEFFICIENT_BITS: int = 16, COEFFICIENT_FRACTION_BITS: int = 15>
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: FirQ15VectorSource<COUNT>
+	filter: FirQ15<TAPS, COEFFICIENT_BITS, COEFFICIENT_FRACTION_BITS>
+	observer: Q15SampleTestObserver
+	public accepted: out int
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+	public capturedFirst0: out bool
+	public capturedLast3: out bool
+
+	new(coefficients: const int[TAPS], values: const int[COUNT])
+	{
+		source = new FirQ15VectorSource<COUNT>(inputStream, values)
+		filter = new FirQ15<TAPS, COEFFICIENT_BITS,
+			COEFFICIENT_FRACTION_BITS>(inputStream, outputStream, coefficients)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = true
+		accepted = observer.accepted
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+		capturedFirst0 = observer.capturedFirst0
+		capturedLast3 = observer.capturedLast3
+	}
+}
+
+/**
+ * Loads one coefficient bank, commits it, and then remains idle.
+ */
+component ReloadableFirQ15TestLoader
+{
+	control: IFirQ15CoefficientControl
+	public configured: out bool
+	public commits: int
+
+	new(control: flip IFirQ15CoefficientControl)
+	{
+		this.control = control
+	}
+
+	process Observe[]()
+	{
+		configured = control.configured
+	}
+
+	process Load()
+	{
+		state Write0 {
+			control.writeIndex = 0
+			control.writeCoefficient = 8192
+			control.writeValid = true
+			control.commitValid = false
+
+			if (control.writeReady) { goto Gap0 }
+		}
+
+		state Gap0 {
+			control.writeValid = false;
+			control.commitValid = false;
+			goto Write1
+		}
+
+		state Write1 {
+			control.writeIndex = 1
+			control.writeCoefficient = 16384
+			control.writeValid = true
+			control.commitValid = false
+
+			if (control.writeReady) { goto Gap1 }
+		}
+
+		state Gap1 {
+			control.writeValid = false;
+			control.commitValid = false;
+			goto Write2
+		}
+
+		state Write2 {
+			control.writeIndex = 2
+			control.writeCoefficient = 8192
+			control.writeValid = true
+			control.commitValid = false
+
+			if (control.writeReady) { goto Gap2 }
+		}
+
+		state Gap2 {
+			control.writeValid = false;
+			control.commitValid = false;
+			goto Commit
+		}
+
+		state Commit {
+			control.writeValid = false
+			control.commitValid = true
+
+			if (control.commitReady) {
+				commits++
+				goto Idle
+			}
+		}
+
+		state Idle {
+			control.writeValid = false
+			control.commitValid = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Reloadable three-tap fixture using the same independent impulse vector.
+ */
+component ReloadableFirQ15Fixture
+{
+	const VALUES: int[4] = [32767, 0, 0, 0]
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	control: IFirQ15CoefficientControl
+	source: FirQ15VectorSource<4>
+	loader: ReloadableFirQ15TestLoader
+	filter: ReloadableFirQ15<3>
+	observer: Q15SampleTestObserver
+	public configured: out bool
+	public sourceAccepted: out int
+	public accepted: out int
+	public commits: out int
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+
+	new()
+	{
+		source = new FirQ15VectorSource<4>(inputStream, VALUES)
+		loader = new ReloadableFirQ15TestLoader(control)
+		filter = new ReloadableFirQ15<3>(inputStream, outputStream, control)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = true
+		configured = loader.configured
+		sourceAccepted = source.accepted
+		accepted = observer.accepted
+		commits = loader.commits
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+	}
+}
+
+/**
+ * Exercises initial loading, complete-bank commit, and an atomic bank swap.
+ */
+component ReloadableFirQ15AtomicStimulus
+{
+	stream: IQ15SampleStream
+	control: IFirQ15CoefficientControl
+	public configured: out bool
+	public acceptedInputs: int
+	public commits: int
+	public sawBlockedBeforeConfiguration: bool
+	public sawCommitBlockedByWrite: bool
+
+	new(stream: flip IQ15SampleStream,
+		control: flip IFirQ15CoefficientControl)
+	{
+		this.stream = stream
+		this.control = control
+	}
+
+	process Observe[]()
+	{
+		configured = control.configured
+	}
+
+	process Run()
+	{
+		state InitialWrite {
+			stream.sample = 1000
+			stream.valid = true
+			stream.first = true
+			stream.last = false
+			control.writeIndex = 0
+			control.writeCoefficient = 16384
+			control.writeValid = true
+			control.commitValid = true
+			goto AwaitInitialWrite
+		}
+
+		state AwaitInitialWrite {
+			if (!stream.ready) {
+				sawBlockedBeforeConfiguration = true
+			}
+
+			if (!control.commitReady) {
+				sawCommitBlockedByWrite = true
+			}
+
+			if (control.writeReady) {
+				goto InitialGap
+			}
+		}
+
+		state InitialGap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			control.writeValid = false
+			control.commitValid = false
+			goto InitialCommit
+		}
+
+		state InitialCommit {
+			control.writeValid = false
+			control.commitValid = true
+			goto AwaitInitialCommit
+		}
+
+		state AwaitInitialCommit {
+			if (control.commitReady) {
+				commits++
+				goto FirstGap
+			}
+		}
+
+		state FirstGap {
+			stream.valid = false
+			control.commitValid = false
+			goto SendFirst
+		}
+
+		state SendFirst {
+			stream.sample = 1000
+			stream.valid = true
+			stream.first = true
+			stream.last = false
+			control.writeValid = false
+			control.commitValid = false
+			goto AwaitFirst
+		}
+
+		state AwaitFirst {
+			if (stream.ready) {
+				stream.valid = false
+				acceptedInputs++
+				goto WriteNext
+			}
+		}
+
+		state WriteNext {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			control.writeIndex = 0
+			control.writeCoefficient = -16384
+			control.writeValid = true
+			control.commitValid = true
+			goto AwaitNextWrite
+		}
+
+		state AwaitNextWrite {
+			if (!control.commitReady) {
+				sawCommitBlockedByWrite = true
+			}
+
+			if (control.writeReady) {
+				goto NextGap
+			}
+		}
+
+		state NextGap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			control.writeValid = false
+			control.commitValid = false
+			goto CommitWithSecond
+		}
+
+		state CommitWithSecond {
+			stream.sample = 2000
+			stream.valid = true
+			stream.first = false
+			stream.last = false
+			control.writeValid = false
+			control.commitValid = true
+			goto AwaitCommitWithSecond
+		}
+
+		state AwaitCommitWithSecond {
+			if (stream.ready && control.commitReady) {
+				stream.valid = false
+				acceptedInputs++
+				commits++
+				goto FinalGap
+			}
+		}
+
+		state FinalGap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			control.writeValid = false
+			control.commitValid = false
+			goto SendThird
+		}
+
+		state SendThird {
+			stream.sample = 3000
+			stream.valid = true
+			stream.first = false
+			stream.last = true
+			control.writeValid = false
+			control.commitValid = false
+			goto AwaitThird
+		}
+
+		state AwaitThird {
+			if (stream.ready) {
+				stream.valid = false
+				acceptedInputs++
+				goto Idle
+			}
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			control.writeValid = false
+			control.commitValid = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * One-tap reload fixture that distinguishes the old and newly committed bank.
+ */
+component ReloadableFirQ15AtomicFixture
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	control: IFirQ15CoefficientControl
+	stimulus: ReloadableFirQ15AtomicStimulus
+	filter: ReloadableFirQ15<1, 16, 14>
+	observer: Q15SampleTestObserver
+	public configured: out bool
+	public acceptedInputs: out int
+	public acceptedOutputs: out int
+	public commits: out int
+	public sawBlockedBeforeConfiguration: out bool
+	public sawCommitBlockedByWrite: out bool
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+
+	new()
+	{
+		stimulus = new ReloadableFirQ15AtomicStimulus(inputStream, control)
+		filter = new ReloadableFirQ15<1, 16, 14>(
+			inputStream, outputStream, control)
+		observer = new Q15SampleTestObserver(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = true
+		configured = stimulus.configured
+		acceptedInputs = stimulus.acceptedInputs
+		acceptedOutputs = observer.accepted
+		commits = stimulus.commits
+		sawBlockedBeforeConfiguration = stimulus.sawBlockedBeforeConfiguration
+		sawCommitBlockedByWrite = stimulus.sawCommitBlockedByWrite
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+	}
+}

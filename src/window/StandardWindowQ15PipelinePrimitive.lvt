@@ -1,0 +1,25 @@
+namespace Livt.Signal.Window
+
+/**
+ * Native folded-table datapath shared by standard Q1.15 windows.
+ */
+@Opaque
+component StandardWindowQ15PipelinePrimitive
+{
+	// Native stream and folded coefficient-table datapath ports.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputSample: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	/**
+	 * Selects the standard window family, frame shape, and periodic convention.
+	 */
+	new(shape: logic[], kind: int, periodic: bool) {}
+}

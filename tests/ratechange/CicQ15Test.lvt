@@ -1,0 +1,192 @@
+namespace Livt.Signal.Tests.RateChange
+
+/**
+ * Verifies CIC arithmetic, rate cadence, framing, and global backpressure.
+ */
+@Test
+component CicQ15Test
+{
+	const DECIMATION_VALUES: int[8] = [1000, 3000, -1000, 1000,
+		32767, 32767, -32768, -32768]
+	const ROUNDING_VALUES: int[8] = [0, 1, 1, 2, 0, -1, -1, -2]
+	const DELAY_VALUES: int[8] = [1000, 1000, 1000, 1000,
+		1000, 1000, 1000, 1000]
+	const IMPULSE_VALUES: int[8] = [16384, 0, 0, 0, 0, 0, 0, 0]
+	const MISALIGNED_VALUES: int[3] = [1000, 3000, 5000]
+	const INTERPOLATION_VALUES: int[3] = [1000, 3000, -1000]
+	const RANDOM_VALUES: int[9] = [12000, -7000, 23000, -31000, 5000,
+		17000, -9000, 30000, -22000]
+	const RANDOM_INTERPOLATION_VALUES: int[2] = [12000, -7000]
+
+	decimation: CicDecimatorQ15Fixture<8, 4, 2, 1, 1, 1>
+	rounding: CicDecimatorQ15Fixture<8, 4, 2, 1, 1, 1>
+	differentialDelay: CicDecimatorQ15Fixture<8, 4, 2, 1, 2, 2>
+	impulse: CicDecimatorQ15Fixture<8, 4, 2, 2, 1, 2>
+	misaligned: CicDecimatorQ15Fixture<3, 1, 2, 1, 1, 1>
+	interpolation: CicInterpolatorQ15Fixture<3, 6, 2, 1, 1, 0>
+	stalledDecimation: CicDecimatorQ15Fixture<8, 4, 2, 1, 1, 1>
+	stalledInterpolation: CicInterpolatorQ15Fixture<3, 6, 2, 1, 1, 0>
+	randomDecimation: CicDecimatorQ15Fixture<9, 3, 3, 2, 1, 4>
+	randomInterpolation: CicInterpolatorQ15Fixture<2, 6, 3, 2, 1, 2>
+	defaultContract: CicQ15DefaultContractFixture
+
+	new()
+	{
+		decimation = new CicDecimatorQ15Fixture<8, 4, 2, 1, 1, 1>(
+			DECIMATION_VALUES)
+		rounding = new CicDecimatorQ15Fixture<8, 4, 2, 1, 1, 1>(
+			ROUNDING_VALUES)
+		differentialDelay = new CicDecimatorQ15Fixture<8, 4, 2, 1, 2, 2>(
+			DELAY_VALUES)
+		impulse = new CicDecimatorQ15Fixture<8, 4, 2, 2, 1, 2>(
+			IMPULSE_VALUES)
+		misaligned = new CicDecimatorQ15Fixture<3, 1, 2, 1, 1, 1>(
+			MISALIGNED_VALUES)
+		interpolation = new CicInterpolatorQ15Fixture<3, 6, 2, 1, 1, 0>(
+			INTERPOLATION_VALUES)
+		stalledDecimation = new CicDecimatorQ15Fixture<8, 4, 2, 1, 1, 1>(
+			DECIMATION_VALUES)
+		stalledInterpolation = new CicInterpolatorQ15Fixture<3, 6, 2, 1, 1, 0>(
+			INTERPOLATION_VALUES)
+		randomDecimation = new CicDecimatorQ15Fixture<9, 3, 3, 2, 1, 4>(
+			RANDOM_VALUES)
+		randomInterpolation = new CicInterpolatorQ15Fixture<2, 6, 3, 2, 1, 2>(
+			RANDOM_INTERPOLATION_VALUES)
+		defaultContract = new CicQ15DefaultContractFixture()
+	}
+
+	@Test
+	fn DecimatesWithExactGainRoundingAndSaturation()
+	{
+		decimation.outputReady = true
+		rounding.outputReady = true
+		Simulation.Wait(80)
+
+		assert decimation.accepted == 4
+		assert decimation.capturedSample0 == 2000
+		assert decimation.capturedSample1 == 0
+		assert decimation.capturedSample2 == 0x7FFF
+		assert decimation.capturedSample3 == 0x8000
+		assert decimation.firstSeen
+		assert decimation.lastSeen
+
+		assert rounding.accepted == 4
+		assert rounding.capturedSample0 == 0
+		assert rounding.capturedSample1 == 2
+		assert rounding.capturedSample2 == 0
+		assert rounding.capturedSample3 == 0xFFFE
+	}
+
+	@Test
+	fn SupportsMultipleStagesAndDifferentialDelay()
+	{
+		differentialDelay.outputReady = true
+		impulse.outputReady = true
+		Simulation.Wait(100)
+
+		assert differentialDelay.accepted == 4
+		assert differentialDelay.capturedSample0 == 500
+		assert differentialDelay.capturedSample1 == 1000
+		assert differentialDelay.capturedSample2 == 1000
+		assert differentialDelay.capturedSample3 == 1000
+
+		assert impulse.accepted == 4
+		assert impulse.capturedSample0 == 8192
+		assert impulse.capturedSample1 == 0
+		assert impulse.capturedSample2 == 0
+		assert impulse.capturedSample3 == 0
+		assert impulse.GetAccumulatorBits() == 18
+		assert impulse.GetInputInitiationInterval() == 1
+		assert impulse.GetOutputInitiationInterval() == 2
+		assert defaultContract.GetDecimatorBits() == 19
+		assert defaultContract.GetDecimatorShift() == 3
+		assert defaultContract.GetInterpolatorBits() == 19
+		assert defaultContract.GetInterpolatorShift() == 2
+	}
+
+	@Test
+	fn InterpolatesWithAlignedExpandedMarkers()
+	{
+		interpolation.outputReady = true
+		Simulation.Wait(80)
+
+		assert interpolation.sourceAccepted == 3
+		assert interpolation.accepted == 6
+		assert interpolation.capturedSample0 == 1000
+		assert interpolation.capturedSample1 == 1000
+		assert interpolation.capturedSample2 == 3000
+		assert interpolation.capturedSample3 == 3000
+		assert interpolation.capturedSample4 == 0xFC18
+		assert interpolation.capturedSample5 == 0xFC18
+		assert interpolation.firstSeen
+		assert interpolation.lastSeen
+		assert interpolation.GetAccumulatorBits() == 17
+		assert interpolation.GetInputInitiationInterval() == 2
+		assert interpolation.GetOutputInitiationInterval() == 1
+	}
+
+	@Test
+	fn MatchesIndependentDeterministicRandomReferences()
+	{
+		randomDecimation.outputReady = true
+		randomInterpolation.outputReady = true
+		Simulation.Wait(120)
+
+		assert randomDecimation.accepted == 3
+		assert randomDecimation.capturedSample0 == 2812
+		assert randomDecimation.capturedSample1 == 0xF968
+		assert randomDecimation.capturedSample2 == 3125
+		assert randomDecimation.firstSeen
+		assert randomDecimation.lastSeen
+
+		assert randomInterpolation.accepted == 6
+		assert randomInterpolation.capturedSample0 == 3000
+		assert randomInterpolation.capturedSample1 == 6000
+		assert randomInterpolation.capturedSample2 == 9000
+		assert randomInterpolation.capturedSample3 == 4250
+		assert randomInterpolation.capturedSample4 == 0xFE0C
+		assert randomInterpolation.capturedSample5 == 0xEB7E
+		assert randomInterpolation.firstSeen
+		assert randomInterpolation.lastSeen
+	}
+
+	@Test
+	fn ReportsMisalignedDecimatorFramesWithoutPartialOutput()
+	{
+		misaligned.outputReady = true
+		Simulation.Wait(60)
+
+		assert misaligned.sourceAccepted == 3
+		assert misaligned.accepted == 1
+		assert misaligned.capturedSample0 == 2000
+		assert misaligned.firstSeen
+		assert !misaligned.lastSeen
+		assert misaligned.alignmentErrorSeen
+	}
+
+	@Test
+	fn FreezesPipelinesAndRetainsResultsWhileStalled()
+	{
+		stalledDecimation.outputReady = false
+		stalledInterpolation.outputReady = false
+		Simulation.Wait(30)
+		assert stalledDecimation.outputValid
+		assert stalledInterpolation.outputValid
+		assert stalledDecimation.accepted == 0
+		assert stalledInterpolation.accepted == 0
+
+		stalledDecimation.outputReady = true
+		stalledInterpolation.outputReady = true
+		Simulation.Wait(100)
+		assert stalledDecimation.accepted == 4
+		assert stalledDecimation.capturedSample0 == 2000
+		assert stalledDecimation.capturedSample3 == 0x8000
+		assert stalledDecimation.firstSeen
+		assert stalledDecimation.lastSeen
+		assert stalledInterpolation.accepted == 6
+		assert stalledInterpolation.capturedSample0 == 1000
+		assert stalledInterpolation.capturedSample5 == 0xFC18
+		assert stalledInterpolation.firstSeen
+		assert stalledInterpolation.lastSeen
+	}
+}

@@ -1,0 +1,143 @@
+namespace Livt.Signal.Tests.Window
+
+using Livt.Signal.Stream
+
+/**
+ * Emits a fixed vector; pattern one exercises frame recovery boundaries.
+ */
+component WindowQ15VectorSource<COUNT: int, PATTERN: int = 0>
+{
+	stream: IQ15SampleStream
+	values: int[COUNT]
+	index: int
+	public accepted: int
+
+	new(stream: flip IQ15SampleStream, values: const int[COUNT])
+	{
+		this.stream = stream
+		this.values = values
+	}
+
+	process Send()
+	{
+		state Emit {
+			stream.sample = values[index] as logic[16]
+			stream.valid = true
+			static if (PATTERN == 0) {
+				stream.first = index == 0
+				stream.last = index == COUNT - 1
+			} else {
+				stream.first = index == 0 || index == 3 || index == 5
+				stream.last = index == 1
+			}
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == COUNT - 1) {
+					goto Idle
+				} else {
+					index++
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Emit
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Retains up to twelve accepted window results.
+ */
+component WindowQ15VectorObserver
+{
+	stream: IQ15SampleStream
+	public ready: in bool
+	public valid: out bool
+	public accepted: int
+	public firstSeen: bool
+	public lastSeen: bool
+	public sample0: logic[16]
+	public sample1: logic[16]
+	public sample2: logic[16]
+	public sample3: logic[16]
+	public sample4: logic[16]
+	public sample5: logic[16]
+	public sample6: logic[16]
+	public sample7: logic[16]
+	public sample8: logic[16]
+	public sample9: logic[16]
+	public sample10: logic[16]
+	public sample11: logic[16]
+
+	new(stream: IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Observe[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready
+		valid = stream.valid
+	}
+
+	process Capture()
+	{
+		state {
+			if (stream.valid && stream.ready) {
+				if (accepted == 0) {
+					sample0 = stream.sample
+				} elif (accepted == 1) {
+					sample1 = stream.sample
+				} elif (accepted == 2) {
+					sample2 = stream.sample
+				} elif (accepted == 3) {
+					sample3 = stream.sample
+				} elif (accepted == 4) {
+					sample4 = stream.sample
+				} elif (accepted == 5) {
+					sample5 = stream.sample
+				} elif (accepted == 6) {
+					sample6 = stream.sample
+				} elif (accepted == 7) {
+					sample7 = stream.sample
+				} elif (accepted == 8) {
+					sample8 = stream.sample
+				} elif (accepted == 9) {
+					sample9 = stream.sample
+				} elif (accepted == 10) {
+					sample10 = stream.sample
+				} elif (accepted == 11) {
+					sample11 = stream.sample
+				}
+
+				if (accepted == 0 && stream.first) {
+					firstSeen = true
+				}
+
+				if (stream.last) {
+					lastSeen = true
+				}
+
+				accepted++
+			}
+		}
+	}
+}

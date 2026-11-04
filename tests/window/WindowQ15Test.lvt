@@ -1,0 +1,232 @@
+namespace Livt.Signal.Tests.Window
+
+using Livt.Signal.Stream
+using Livt.Signal.Window
+
+/**
+ * Verifies standard coefficient tables, framing, arithmetic, and stalling.
+ */
+@Test
+component WindowQ15Test
+{
+	const EIGHT_NEGATIVE_FULL_SCALE: int[8] = [-32768, -32768, -32768,
+		-32768, -32768, -32768, -32768, -32768]
+	const FOUR_POSITIVE_FULL_SCALE: int[4] = [32767, 32767, 32767, 32767]
+	const TEN_NEGATIVE_FULL_SCALE: int[10] = [-32768, -32768, -32768,
+		-32768, -32768, -32768, -32768, -32768, -32768, -32768]
+	const CUSTOM_COEFFICIENTS: int[4] = [32767, 16384, 0, -16384]
+	const FRAME_COEFFICIENTS: int[4] = [1000, 2000, 3000, 4000]
+
+	hannIn: IQ15SampleStream
+	hannOut: IQ15SampleStream
+	hannSource: WindowQ15VectorSource<8>
+	hann: HannWindowQ15<8>
+	hannObserver: WindowQ15VectorObserver
+
+	periodicHannIn: IQ15SampleStream
+	periodicHannOut: IQ15SampleStream
+	periodicHannSource: WindowQ15VectorSource<8>
+	periodicHann: PeriodicHannWindowQ15<8>
+	periodicHannObserver: WindowQ15VectorObserver
+
+	hammingIn: IQ15SampleStream
+	hammingOut: IQ15SampleStream
+	hammingSource: WindowQ15VectorSource<8>
+	hamming: HammingWindowQ15<8>
+	hammingObserver: WindowQ15VectorObserver
+
+	periodicHammingIn: IQ15SampleStream
+	periodicHammingOut: IQ15SampleStream
+	periodicHammingSource: WindowQ15VectorSource<8>
+	periodicHamming: PeriodicHammingWindowQ15<8>
+	periodicHammingObserver: WindowQ15VectorObserver
+
+	blackmanIn: IQ15SampleStream
+	blackmanOut: IQ15SampleStream
+	blackmanSource: WindowQ15VectorSource<8>
+	blackman: BlackmanWindowQ15<8>
+	blackmanObserver: WindowQ15VectorObserver
+
+	periodicBlackmanIn: IQ15SampleStream
+	periodicBlackmanOut: IQ15SampleStream
+	periodicBlackmanSource: WindowQ15VectorSource<8>
+	periodicBlackman: PeriodicBlackmanWindowQ15<8>
+	periodicBlackmanObserver: WindowQ15VectorObserver
+
+	customIn: IQ15SampleStream
+	customOut: IQ15SampleStream
+	customSource: WindowQ15VectorSource<4>
+	custom: WindowQ15<4>
+	customObserver: WindowQ15VectorObserver
+
+	frameIn: IQ15SampleStream
+	frameOut: IQ15SampleStream
+	frameSource: WindowQ15VectorSource<10, 1>
+	frameWindow: WindowQ15<4>
+	frameObserver: WindowQ15VectorObserver
+
+	stalledIn: IQ15SampleStream
+	stalledOut: IQ15SampleStream
+	stalledSource: WindowQ15VectorSource<8>
+	stalledWindow: PeriodicHannWindowQ15<8>
+	stalledObserver: WindowQ15VectorObserver
+
+	new()
+	{
+		hannSource = new WindowQ15VectorSource<8>(hannIn, EIGHT_NEGATIVE_FULL_SCALE)
+		hann = new HannWindowQ15<8>(hannIn, hannOut)
+		hannObserver = new WindowQ15VectorObserver(hannOut)
+		periodicHannSource = new WindowQ15VectorSource<8>(periodicHannIn,
+			EIGHT_NEGATIVE_FULL_SCALE)
+		periodicHann = new PeriodicHannWindowQ15<8>(periodicHannIn,
+			periodicHannOut)
+		periodicHannObserver = new WindowQ15VectorObserver(periodicHannOut)
+		hammingSource = new WindowQ15VectorSource<8>(hammingIn,
+			EIGHT_NEGATIVE_FULL_SCALE)
+		hamming = new HammingWindowQ15<8>(hammingIn, hammingOut)
+		hammingObserver = new WindowQ15VectorObserver(hammingOut)
+		periodicHammingSource = new WindowQ15VectorSource<8>(periodicHammingIn,
+			EIGHT_NEGATIVE_FULL_SCALE)
+		periodicHamming = new PeriodicHammingWindowQ15<8>(periodicHammingIn,
+			periodicHammingOut)
+		periodicHammingObserver = new WindowQ15VectorObserver(periodicHammingOut)
+		blackmanSource = new WindowQ15VectorSource<8>(blackmanIn,
+			EIGHT_NEGATIVE_FULL_SCALE)
+		blackman = new BlackmanWindowQ15<8>(blackmanIn, blackmanOut)
+		blackmanObserver = new WindowQ15VectorObserver(blackmanOut)
+		periodicBlackmanSource = new WindowQ15VectorSource<8>(periodicBlackmanIn,
+			EIGHT_NEGATIVE_FULL_SCALE)
+		periodicBlackman = new PeriodicBlackmanWindowQ15<8>(periodicBlackmanIn,
+			periodicBlackmanOut)
+		periodicBlackmanObserver = new WindowQ15VectorObserver(periodicBlackmanOut)
+		customSource = new WindowQ15VectorSource<4>(customIn,
+			FOUR_POSITIVE_FULL_SCALE)
+		custom = new WindowQ15<4>(customIn, customOut, CUSTOM_COEFFICIENTS)
+		customObserver = new WindowQ15VectorObserver(customOut)
+		frameSource = new WindowQ15VectorSource<10, 1>(frameIn,
+			TEN_NEGATIVE_FULL_SCALE)
+		frameWindow = new WindowQ15<4>(frameIn, frameOut, FRAME_COEFFICIENTS)
+		frameObserver = new WindowQ15VectorObserver(frameOut)
+		stalledSource = new WindowQ15VectorSource<8>(stalledIn,
+			EIGHT_NEGATIVE_FULL_SCALE)
+		stalledWindow = new PeriodicHannWindowQ15<8>(stalledIn, stalledOut)
+		stalledObserver = new WindowQ15VectorObserver(stalledOut)
+	}
+
+	@Test
+	fn MatchesGeneratedStandardTables()
+	{
+		hannObserver.ready = true
+		periodicHannObserver.ready = true
+		hammingObserver.ready = true
+		periodicHammingObserver.ready = true
+		blackmanObserver.ready = true
+		periodicBlackmanObserver.ready = true
+		Simulation.Wait(48)
+		assert hannObserver.accepted == 8
+		assert hannObserver.sample0 == 0
+		assert hannObserver.sample1 == 0xE7E7
+		assert hannObserver.sample2 == 0xB1C2
+		assert hannObserver.sample3 == 0x8657
+		assert hannObserver.sample4 == 0x8657
+		assert hannObserver.sample5 == 0xB1C2
+		assert hannObserver.sample6 == 0xE7E7
+		assert hannObserver.sample7 == 0
+		assert periodicHannObserver.sample0 == 0
+		assert periodicHannObserver.sample1 == 0xED41
+		assert periodicHannObserver.sample2 == 0xC000
+		assert periodicHannObserver.sample3 == 0x92BF
+		assert periodicHannObserver.sample4 == 0x8001
+		assert periodicHannObserver.sample5 == 0x92BF
+		assert periodicHannObserver.sample6 == 0xC000
+		assert periodicHannObserver.sample7 == 0xED41
+		assert hammingObserver.sample0 == 0xF5C3
+		assert hammingObserver.sample1 == 0xDF97
+		assert hammingObserver.sample2 == 0xADC7
+		assert hammingObserver.sample3 == 0x85D5
+		assert hammingObserver.sample4 == 0x85D5
+		assert hammingObserver.sample5 == 0xADC7
+		assert hammingObserver.sample6 == 0xDF97
+		assert hammingObserver.sample7 == 0xF5C3
+		assert periodicHammingObserver.sample0 == 0xF5C3
+		assert periodicHammingObserver.sample1 == 0xE484
+		assert periodicHammingObserver.sample2 == 0xBAE1
+		assert periodicHammingObserver.sample3 == 0x913F
+		assert periodicHammingObserver.sample4 == 0x8001
+		assert periodicHammingObserver.sample5 == 0x913F
+		assert periodicHammingObserver.sample6 == 0xBAE1
+		assert periodicHammingObserver.sample7 == 0xE484
+		assert blackmanObserver.sample0 == 0
+		assert blackmanObserver.sample1 == 0xF46C
+		assert blackmanObserver.sample2 == 0xC539
+		assert blackmanObserver.sample3 == 0x8A32
+		assert blackmanObserver.sample4 == 0x8A32
+		assert blackmanObserver.sample5 == 0xC539
+		assert blackmanObserver.sample6 == 0xF46C
+		assert blackmanObserver.sample7 == 0
+		assert periodicBlackmanObserver.sample0 == 0
+		assert periodicBlackmanObserver.sample1 == 0xF77F
+		assert periodicBlackmanObserver.sample2 == 0xD47B
+		assert periodicBlackmanObserver.sample3 == 0x9CFC
+		assert periodicBlackmanObserver.sample4 == 0x8001
+		assert periodicBlackmanObserver.sample5 == 0x9CFC
+		assert periodicBlackmanObserver.sample6 == 0xD47B
+		assert periodicBlackmanObserver.sample7 == 0xF77F
+		assert hannObserver.firstSeen
+		assert hannObserver.lastSeen
+	}
+
+	@Test
+	fn SupportsArbitrarySignedFixedWindows()
+	{
+		customObserver.ready = true
+		Simulation.Wait(24)
+		assert customObserver.accepted == 4
+		assert customObserver.sample0 == 32766
+		assert customObserver.sample1 == 16384
+		assert customObserver.sample2 == 0
+		assert customObserver.sample3 == 0xC000
+	}
+
+	@Test
+	fn ResynchronizesAndWrapsFramePosition()
+	{
+		frameObserver.ready = true
+		Simulation.Wait(48)
+		assert frameObserver.accepted == 10
+		assert frameObserver.sample0 == 0xFC18
+		assert frameObserver.sample1 == 0xF830
+		assert frameObserver.sample2 == 0xFC18
+		assert frameObserver.sample3 == 0xFC18
+		assert frameObserver.sample4 == 0xF830
+		assert frameObserver.sample5 == 0xFC18
+		assert frameObserver.sample6 == 0xF830
+		assert frameObserver.sample7 == 0xF448
+		assert frameObserver.sample8 == 0xF060
+		assert frameObserver.sample9 == 0xFC18
+		assert frameObserver.firstSeen
+		assert frameObserver.lastSeen
+	}
+
+	@Test
+	fn FreezesCoefficientPositionWhileStalled()
+	{
+		stalledObserver.ready = false
+		Simulation.Wait(10)
+		assert stalledObserver.valid
+		assert stalledObserver.accepted == 0
+
+		stalledObserver.ready = true
+		Simulation.Wait(40)
+		assert stalledSource.accepted == 8
+		assert stalledObserver.accepted == 8
+		assert stalledObserver.sample0 == 0
+		assert stalledObserver.sample1 == 0xED41
+		assert stalledObserver.sample2 == 0xC000
+		assert stalledObserver.sample3 == 0x92BF
+		assert stalledObserver.sample4 == 0x8001
+		assert stalledObserver.sample5 == 0x92BF
+		assert stalledObserver.sample6 == 0xC000
+		assert stalledObserver.sample7 == 0xED41
+	}
+}

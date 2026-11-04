@@ -1,0 +1,87 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Computes one in-place radix-2 FFT or IFFT using a shared Q1.15 butterfly.
+ * The component accepts exactly one complete frame, computes it, and emits the
+ * retained result before accepting another frame. Stage scaling is selected by
+ * the low STAGES bits of STAGE_SHIFT_MASK; -1 shifts every stage. Reset cancels
+ * a partial input frame, active transform, or unread output.
+ */
+component SequentialFftQ15<SAMPLES: int,
+	DIRECTION: FftDirection = FftDirection.Forward,
+	STAGE_SHIFT_MASK: int = -1,
+	INPUT_ORDER: FftOrder = FftOrder.Natural,
+	OUTPUT_ORDER: FftOrder = FftOrder.Natural>
+{
+	static assert SAMPLES == 8 || SAMPLES == 16 || SAMPLES == 32
+		|| SAMPLES == 64 || SAMPLES == 128 || SAMPLES == 256
+		|| SAMPLES == 512 || SAMPLES == 1024 || SAMPLES == 2048
+		|| SAMPLES == 4096,
+		"sequential FFT length must be a supported power of two in 8..4096"
+	static assert STAGE_SHIFT_MASK >= -1 && STAGE_SHIFT_MASK <= 4095,
+		"FFT stage shift mask must be -1 or a nonnegative 12-bit mask"
+
+	// Published sizing, throughput, storage, resource, and configuration contract.
+	public const SAMPLE_COUNT: int = SAMPLES
+	public const STAGES: int = Bits.RequiredFor(SAMPLES - 1)
+	public const INPUT_LANES: int = 1
+	public const OUTPUT_LANES: int = 1
+	public const BUTTERFLY_COUNT: int = SAMPLES / 2 * STAGES
+	public const BUTTERFLY_CYCLES: int = 2
+	public const COMPUTE_CYCLES: int = BUTTERFLY_COUNT * BUTTERFLY_CYCLES
+	public const NOMINAL_FRAME_LATENCY: int = SAMPLES + COMPUTE_CYCLES
+	public const OUTPUT_INITIATION_INTERVAL: int = 2
+	public const FRAME_INITIATION_INTERVAL: int = 3 * SAMPLES
+		+ COMPUTE_CYCLES
+	public const SAMPLE_STORAGE_WORDS: int = SAMPLES
+	public const TWIDDLE_STORAGE_WORDS: int = SAMPLES / 2
+	public const MULTIPLIER_COUNT: int = 4
+	public const CONFIGURED_STAGE_SHIFT_MASK: int = STAGE_SHIFT_MASK
+	public const CONFIGURED_DIRECTION: FftDirection = DIRECTION
+	public const CONFIGURED_INPUT_ORDER: FftOrder = INPUT_ORDER
+	public const CONFIGURED_OUTPUT_ORDER: FftOrder = OUTPUT_ORDER
+
+	// Borrowed streams, elaboration shapes, and the owned sequential datapath.
+	inputStream: IComplexSampleStream<logic[16]>
+	outputStream: IComplexSampleStream<logic[16]>
+	sampleShape: logic[SAMPLES]
+	stageShape: logic[STAGES]
+	primitive: SequentialFftQ15Primitive
+
+	// Pulses when an accepted frame does not contain exactly SAMPLES tokens.
+	public frameLengthError: out bool
+
+	/**
+	 * Binds borrowed scalar complex streams to the fixed transform configuration.
+	 */
+	new(inputStream: IComplexSampleStream<logic[16]>,
+		outputStream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		primitive = new SequentialFftQ15Primitive(sampleShape, stageShape,
+			STAGE_SHIFT_MASK, DIRECTION == FftDirection.Inverse,
+			INPUT_ORDER == FftOrder.BitReversed,
+			OUTPUT_ORDER == FftOrder.BitReversed)
+	}
+
+	/**
+	 * Connects the borrowed stream handshakes and aligned complex payloads.
+	 */
+	process Drive[]()
+	{
+		primitive.inputValid = inputStream.valid
+		primitive.inputReal = inputStream.real
+		primitive.inputImag = inputStream.imag
+		primitive.inputFirst = inputStream.first
+		primitive.inputLast = inputStream.last
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.inputReady
+		outputStream.valid = primitive.outputValid
+		outputStream.real = primitive.outputReal
+		outputStream.imag = primitive.outputImag
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+		frameLengthError = primitive.frameLengthError
+	}
+}

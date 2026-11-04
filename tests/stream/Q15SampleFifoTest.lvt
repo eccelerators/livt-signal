@@ -1,0 +1,52 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Verifies framed Q1.15 buffering through a packed four-token FIFO.
+ */
+@Test
+component Q15SampleFifoTest
+{
+	fixture: Q15SampleFifoFixture
+
+	/**
+	 * Creates a fresh composed stream fixture.
+	 */
+	new()
+	{
+		fixture = new Q15SampleFifoFixture()
+	}
+
+	/**
+	 * Fills to capacity, holds the head stable, and drains in acceptance order.
+	 */
+	@Test
+	fn PreservesTokensWhenFullAndDraining()
+	{
+		fixture.outputReady = false
+		Simulation.Wait(100)
+		assert fixture.sourceAccepted == 4
+		assert fixture.outputValid
+		assert fixture.outputSample == 0x8000
+		assert fixture.outputFirst
+		assert !fixture.outputLast
+
+		Simulation.Wait(5)
+		assert fixture.outputValid
+		assert fixture.outputSample == 0x8000
+		assert fixture.outputFirst
+		assert !fixture.outputLast
+
+		fixture.outputReady = true
+		Simulation.Wait(12)
+		fixture.outputReady = false
+		Simulation.Wait(3)
+		assert !fixture.outputValid
+		assert fixture.accepted == 4
+		assert fixture.capturedSample0 == 0x8000
+		assert fixture.capturedSample1 == 0xFFFF
+		assert fixture.capturedSample2 == 0x0000
+		assert fixture.capturedSample3 == 0x7FFF
+		assert fixture.capturedFirst0
+		assert fixture.capturedLast3
+	}
+}

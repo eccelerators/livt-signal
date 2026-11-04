@@ -1,0 +1,27 @@
+namespace Livt.Signal.RateChange
+
+/**
+ * Native registered integrator and comb pipeline for Q1.15 CIC decimation.
+ */
+@Opaque
+component CicDecimatorQ15PipelinePrimitive
+{
+	// Native stream, datapath, and frame-diagnostic ports.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputSample: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+	public frameAlignmentError: out bool
+
+	/**
+	 * Configures rate, stage count, differential delay, and output scaling.
+	 */
+	new(rateShape: logic[], stageShape: logic[], delayShape: logic[],
+		widthShape: logic[], outputShift: int) {}
+}

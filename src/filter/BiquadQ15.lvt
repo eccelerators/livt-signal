@@ -1,0 +1,63 @@
+namespace Livt.Signal.Filter
+
+using Livt.Signal.Stream
+
+/**
+ * Fixed-coefficient direct-form-I Q1.15 biquad with global stalling.
+ */
+component BiquadQ15<COEFFICIENT_BITS: int = 16,
+	COEFFICIENT_FRACTION_BITS: int = 14>
+{
+	static assert COEFFICIENT_BITS >= 2 && COEFFICIENT_BITS <= 31,
+		"biquad coefficient width must be in 2..31"
+	static assert COEFFICIENT_FRACTION_BITS >= 0
+		&& COEFFICIENT_FRACTION_BITS < COEFFICIENT_BITS,
+		"biquad coefficient fractional bits must be in 0..COEFFICIENT_BITS-1"
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 1
+	public const CAPACITY: int = 1
+	public const MULTIPLIER_COUNT: int = 5
+	public const PRODUCT_BITS: int = 16 + COEFFICIENT_BITS
+	public const ACCUMULATOR_BITS: int = PRODUCT_BITS + 3
+
+	// Borrowed streams, retained fixed coefficients, and the owned datapath.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	numerator: int[3]
+	denominator: int[2]
+	primitive: BiquadQ15PipelinePrimitive
+
+	/**
+	 * Binds borrowed endpoints and one normalized fixed SOS coefficient set.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream,
+		numerator: const int[3], denominator: const int[2])
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		this.numerator = numerator
+		this.denominator = denominator
+		primitive = new BiquadQ15PipelinePrimitive(this.numerator,
+			this.denominator, COEFFICIENT_BITS,
+			COEFFICIENT_FRACTION_BITS)
+	}
+
+	/**
+	 * Connects the fixed biquad primitive to the borrowed stream endpoints.
+	 */
+	process Drive[]()
+	{
+		primitive.inputValid = inputStream.valid
+		primitive.inputSample = inputStream.sample
+		primitive.inputFirst = inputStream.first
+		primitive.inputLast = inputStream.last
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.inputReady
+		outputStream.valid = primitive.outputValid
+		outputStream.sample = primitive.outputSample
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+	}
+}

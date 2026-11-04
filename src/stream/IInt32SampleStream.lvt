@@ -1,0 +1,14 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Signed-32 samples with valid/ready flow control and frame markers.
+ */
+interface IInt32SampleStream
+{
+	// Signed payload, transfer handshake, and non-empty-frame boundaries.
+	sample: in int
+	valid: in bool
+	first: in bool
+	last: in bool
+	ready: out bool
+}

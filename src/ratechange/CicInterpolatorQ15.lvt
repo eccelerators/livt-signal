@@ -1,0 +1,75 @@
+namespace Livt.Signal.RateChange
+
+using Livt.Signal.Stream
+
+/**
+ * Multiplier-free integer-rate CIC interpolator with a saturating Q1.15 output.
+ */
+component CicInterpolatorQ15<RATE: int, STAGES: int = 3,
+	DIFFERENTIAL_DELAY: int = 1,
+	OUTPUT_SHIFT: int = -1>
+{
+	static assert RATE >= 2 && RATE <= 1024,
+		"CIC interpolation rate must be in 2..1024"
+	static assert STAGES >= 1 && STAGES <= 6,
+		"CIC stage count must be in 1..6"
+	static assert DIFFERENTIAL_DELAY >= 1 && DIFFERENTIAL_DELAY <= 2,
+		"CIC differential delay must be 1 or 2"
+	static assert OUTPUT_SHIFT >= -1,
+		"CIC output shift must be -1 for automatic scaling or nonnegative"
+
+	public const INTERNAL_GROWTH_BITS: int = STAGES
+		* Bits.RequiredFor(RATE * DIFFERENTIAL_DELAY - 1)
+	public const ACCUMULATOR_BITS: int = 16 + INTERNAL_GROWTH_BITS
+	public const AUTOMATIC_OUTPUT_SHIFT: int = (STAGES - 1)
+		* Bits.RequiredFor(RATE - 1)
+		+ STAGES * (Bits.RequiredFor(DIFFERENTIAL_DELAY - 1)
+		- (1 / DIFFERENTIAL_DELAY))
+	public const CONFIGURED_OUTPUT_SHIFT: int = OUTPUT_SHIFT
+	public const INPUT_INITIATION_INTERVAL: int = RATE
+	public const OUTPUT_INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = STAGES
+	public const CAPACITY: int = STAGES
+	public const MULTIPLIER_COUNT: int = 0
+	const COMB_STORAGE: int = STAGES * DIFFERENTIAL_DELAY
+
+	static assert OUTPUT_SHIFT < ACCUMULATOR_BITS,
+		"CIC output shift must be smaller than the accumulator width"
+
+	// Borrowed streams, elaboration shapes, and the owned CIC datapath.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	rateShape: logic[RATE]
+	stageShape: logic[STAGES]
+	delayShape: logic[COMB_STORAGE]
+	widthShape: logic[ACCUMULATOR_BITS]
+	primitive: CicInterpolatorQ15PipelinePrimitive
+
+	/**
+	 * Binds borrowed endpoints to one fixed-rate CIC interpolator.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		primitive = new CicInterpolatorQ15PipelinePrimitive(rateShape,
+			stageShape, delayShape, widthShape, OUTPUT_SHIFT)
+	}
+
+	/**
+	 * Connects the fixed-rate interpolator primitive to the borrowed endpoints.
+	 */
+	process Drive[]()
+	{
+		primitive.inputValid = inputStream.valid
+		primitive.inputSample = inputStream.sample
+		primitive.inputFirst = inputStream.first
+		primitive.inputLast = inputStream.last
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.inputReady
+		outputStream.valid = primitive.outputValid
+		outputStream.sample = primitive.outputSample
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+	}
+}

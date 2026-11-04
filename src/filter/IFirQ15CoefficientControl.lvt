@@ -1,0 +1,21 @@
+namespace Livt.Signal.Filter
+
+/**
+ * Loads the inactive coefficient bank of a reloadable Q1.15-sample FIR filter.
+ * A write transfers when writeValid and writeReady are both true. A commit
+ * transfers when commitValid and commitReady are both true; it atomically makes
+ * the completely loaded bank active for the next accepted sample.
+ */
+interface IFirQ15CoefficientControl
+{
+	// Inactive-bank write request using the filter's configured coefficient format.
+	writeIndex: in int
+	writeCoefficient: in int
+	writeValid: in bool
+	writeReady: out bool
+
+	// Atomic bank-activation request and current configuration state.
+	commitValid: in bool
+	commitReady: out bool
+	configured: out bool
+}

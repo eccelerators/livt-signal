@@ -1,0 +1,71 @@
+namespace Livt.Signal.Filter
+
+using Livt.Signal.Stream
+
+/**
+ * Double-buffered, runtime-reloadable, fully parallel Q1.15 FIR.
+ */
+component ReloadableFirQ15<TAPS: int, COEFFICIENT_BITS: int = 16,
+	COEFFICIENT_FRACTION_BITS: int = 15>
+{
+	static assert TAPS > 0, "FIR tap count must be positive"
+	static assert COEFFICIENT_BITS >= 2 && COEFFICIENT_BITS <= 31,
+		"FIR coefficient width must be in 2..31"
+	static assert COEFFICIENT_FRACTION_BITS >= 0
+		&& COEFFICIENT_FRACTION_BITS < COEFFICIENT_BITS,
+		"FIR coefficient fractional bits must be in 0..COEFFICIENT_BITS-1"
+
+	const TREE_LEVELS: int = Bits.RequiredFor(TAPS - 1) - (1 / TAPS)
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 2 + TREE_LEVELS
+	public const CAPACITY: int = NOMINAL_LATENCY
+	public const PRODUCT_BITS: int = 16 + COEFFICIENT_BITS
+	public const ACCUMULATOR_BITS: int = PRODUCT_BITS + TREE_LEVELS
+
+	// Borrowed sample/control streams and the owned reloadable datapath.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	control: IFirQ15CoefficientControl
+	shape: logic[TAPS]
+	primitive: ReloadableFirQ15PipelinePrimitive
+
+	/**
+	 * Binds borrowed sample and coefficient-control endpoints.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream,
+		control: IFirQ15CoefficientControl)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		this.control = control
+		primitive = new ReloadableFirQ15PipelinePrimitive(shape,
+			COEFFICIENT_BITS, COEFFICIENT_FRACTION_BITS)
+	}
+
+	/**
+	 * Connects sample and coefficient-control streams to the reloadable primitive.
+	 */
+	process Drive[]()
+	{
+		primitive.inputValid = inputStream.valid
+		primitive.inputSample = inputStream.sample
+		primitive.inputFirst = inputStream.first
+		primitive.inputLast = inputStream.last
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.inputReady
+		outputStream.valid = primitive.outputValid
+		outputStream.sample = primitive.outputSample
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+
+		primitive.writeIndex = control.writeIndex
+		primitive.writeCoefficient = control.writeCoefficient
+		primitive.writeValid = control.writeValid
+		control.writeReady = primitive.writeReady
+		primitive.commitValid = control.commitValid
+		control.commitReady = primitive.commitReady
+		control.configured = primitive.configured
+	}
+}

@@ -1,0 +1,52 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Verifies framed Q1.15 transfer through a stallable three-stage delay.
+ */
+@Test
+component Q15SampleDelayTest
+{
+	fixture: Q15SampleDelayFixture
+
+	/**
+	 * Creates a fresh composed stream fixture.
+	 */
+	new()
+	{
+		fixture = new Q15SampleDelayFixture()
+	}
+
+	/**
+	 * Preserves a token and both markers while downstream backpressure is asserted.
+	 */
+	@Test
+	fn PreservesTokenAcrossStall()
+	{
+		fixture.outputReady = false
+		fixture.inputValid = false
+		fixture.inputSample = 0x8001
+		fixture.inputFirst = true
+		fixture.inputLast = true
+		Simulation.Wait(2)
+		fixture.inputValid = true
+		Simulation.Wait(1)
+		fixture.inputValid = false
+		fixture.inputFirst = false
+		fixture.inputLast = false
+		Simulation.Wait(4)
+		assert fixture.outputValid
+		assert fixture.outputSample == 0x8001
+		assert fixture.outputFirst
+		assert fixture.outputLast
+
+		Simulation.Wait(5)
+		assert fixture.outputValid
+		assert fixture.outputSample == 0x8001
+		assert fixture.outputFirst
+		assert fixture.outputLast
+
+		fixture.outputReady = true
+		Simulation.Wait(2)
+		assert !fixture.outputValid
+	}
+}

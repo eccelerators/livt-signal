@@ -1,0 +1,26 @@
+namespace Livt.Signal.Stream
+
+using Livt.Math.FixedPoint
+
+/**
+ * Converts between the IQ15SampleStream bit encoding and raw signed Q1.15 integers.
+ * Conversion preserves the scale of 32768 raw units per mathematical unit.
+ */
+component Q15SampleEncoding
+{
+	/**
+	 * Sign-extends an exact two's-complement Q1.15 stream payload into Livt int.
+	 */
+	public static fn Decode[](sample: logic[16]) int
+	{
+		return sample as int
+	}
+
+	/**
+	 * Saturates a raw Q1.15 integer to -32768..32767 and returns its 16-bit encoding.
+	 */
+	public static fn EncodeSaturating[](value: int) logic[16]
+	{
+		return Q15.ClampValue(value) as logic[16]
+	}
+}

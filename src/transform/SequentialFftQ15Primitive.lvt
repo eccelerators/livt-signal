@@ -1,0 +1,29 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Native-width in-place FFT storage, scheduling, and shared butterfly datapath.
+ */
+@Opaque
+component SequentialFftQ15Primitive
+{
+	// Native complex-stream, datapath, and frame-diagnostic ports.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputReal: in logic[16]
+	public inputImag: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputReal: out logic[16]
+	public outputImag: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+	public frameLengthError: out bool
+
+	/**
+	 * Receives elaboration shapes and the fixed numeric and ordering policies.
+	 */
+	new(sampleShape: logic[], stageShape: logic[], stageShiftMask: int,
+		inverse: bool, inputBitReversed: bool, outputBitReversed: bool) {}
+}

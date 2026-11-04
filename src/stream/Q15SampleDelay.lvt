@@ -1,0 +1,86 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Delays Q1.15 samples and their frame markers through a stallable registered pipeline.
+ * With ready continuously high, latency is STAGES clocks and the initiation interval is
+ * one clock. Downstream backpressure freezes every stage and propagates to the input.
+ */
+component Q15SampleDelay<STAGES: int = 1>
+{
+	static assert STAGES > 0, "Q15 sample delay must contain at least one stage"
+
+	// Total packed payload width across every registered stage.
+	const SAMPLE_BITS: int = 16 * STAGES
+	const OUTPUT_OFFSET: int = 16 * (STAGES - 1)
+
+	// Borrowed input and output stream endpoints.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+
+	// Packed sample pipeline and matching token metadata.
+	samples: logic[SAMPLE_BITS]
+	validStages: logic[STAGES]
+	firstStages: logic[STAGES]
+	lastStages: logic[STAGES]
+
+	// Shared pipeline advance condition.
+	advance: bool
+
+	/**
+	 * Binds a consumer-side input and producer-side output in one clock/reset context.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+	}
+
+	/**
+	 * Drives the stream handshake and the oldest retained token.
+	 */
+	process Drive[]()
+	{
+		advance = validStages[STAGES - 1] == 0b0 || outputStream.ready
+		inputStream.ready = this.context.rst == 0b0 && advance
+		outputStream.valid = this.context.rst == 0b0 && validStages[STAGES - 1] == 0b1
+		outputStream.sample = samples[OUTPUT_OFFSET: OUTPUT_OFFSET + 16]
+		outputStream.first = firstStages[STAGES - 1] == 0b1
+		outputStream.last = lastStages[STAGES - 1] == 0b1
+	}
+
+	/**
+	 * Advances every token and sideband together, or holds the complete pipeline stable.
+	 */
+	process Advance()
+	{
+		state {
+			if (advance) {
+				var nextSamples = samples << 16
+				var nextValid = validStages << 1
+				var nextFirst = firstStages << 1
+				var nextLast = lastStages << 1
+				nextSamples[0: 16] = inputStream.sample
+				nextValid[0] = 0b0
+				nextFirst[0] = 0b0
+				nextLast[0] = 0b0
+
+				if (inputStream.valid) {
+					nextValid[0] = 0b1
+				}
+
+				if (inputStream.first) {
+					nextFirst[0] = 0b1
+				}
+
+				if (inputStream.last) {
+					nextLast[0] = 0b1
+				}
+
+				samples = nextSamples
+				validStages = nextValid
+				firstStages = nextFirst
+				lastStages = nextLast
+			}
+		}
+	}
+}

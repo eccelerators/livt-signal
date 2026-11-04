@@ -1,0 +1,227 @@
+namespace Livt.Signal.Tests.Filter
+
+using Livt.Signal.Filter
+using Livt.Signal.Stream
+
+/**
+ * Emits a fixed sample vector and holds every token until acceptance.
+ */
+component BiquadQ15VectorSource<COUNT: int>
+{
+	stream: IQ15SampleStream
+	values: int[COUNT]
+	index: int
+	public accepted: int
+
+	new(stream: flip IQ15SampleStream, values: const int[COUNT])
+	{
+		this.stream = stream
+		this.values = values
+	}
+
+	process Send()
+	{
+		state Emit {
+			stream.sample = values[index] as logic[16]
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = index == COUNT - 1
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == COUNT - 1) {
+					goto Idle
+				} else {
+					index++
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Emit
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Retains a complete bounded output vector for exact reference comparison.
+ */
+component BiquadQ15VectorObserver<COUNT: int>
+{
+	stream: IQ15SampleStream
+	public ready: in bool
+	public valid: out bool
+	public accepted: int
+	public firstSeen: bool
+	public lastSeen: bool
+	public capturedSample0: logic[16]
+	public capturedSample1: logic[16]
+	public capturedSample2: logic[16]
+	public capturedSample3: logic[16]
+	public capturedSample4: logic[16]
+	public capturedSample5: logic[16]
+	public capturedSample6: logic[16]
+	public capturedSample7: logic[16]
+	public capturedSample8: logic[16]
+	public capturedSample9: logic[16]
+	public capturedSample10: logic[16]
+	public capturedSample11: logic[16]
+
+	new(stream: IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	process Observe[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready
+		valid = stream.valid
+	}
+
+	process Capture()
+	{
+		state {
+			if (stream.valid && stream.ready) {
+				if (accepted == 0) {
+					capturedSample0 = stream.sample
+				} elif (accepted == 1) {
+					capturedSample1 = stream.sample
+				} elif (accepted == 2) {
+					capturedSample2 = stream.sample
+				} elif (accepted == 3) {
+					capturedSample3 = stream.sample
+				} elif (accepted == 4) {
+					capturedSample4 = stream.sample
+				} elif (accepted == 5) {
+					capturedSample5 = stream.sample
+				} elif (accepted == 6) {
+					capturedSample6 = stream.sample
+				} elif (accepted == 7) {
+					capturedSample7 = stream.sample
+				} elif (accepted == 8) {
+					capturedSample8 = stream.sample
+				} elif (accepted == 9) {
+					capturedSample9 = stream.sample
+				} elif (accepted == 10) {
+					capturedSample10 = stream.sample
+				} elif (accepted == 11) {
+					capturedSample11 = stream.sample
+				}
+
+				if (accepted == 0 && stream.first) {
+					firstSeen = true
+				}
+
+				if (accepted == COUNT - 1 && stream.last) {
+					lastSeen = true
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Fixed-vector biquad harness with caller-controlled output capacity.
+ */
+component BiquadQ15VectorFixture<COUNT: int, COEFFICIENT_BITS: int = 16,
+	COEFFICIENT_FRACTION_BITS: int = 14>
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: BiquadQ15VectorSource<COUNT>
+	filter: BiquadQ15<COEFFICIENT_BITS, COEFFICIENT_FRACTION_BITS>
+	observer: BiquadQ15VectorObserver<COUNT>
+
+	public outputReady: in bool
+	public outputValid: out bool
+	public sourceAccepted: out int
+	public accepted: out int
+	public firstSeen: out bool
+	public lastSeen: out bool
+	public capturedSample0: out logic[16]
+	public capturedSample1: out logic[16]
+	public capturedSample2: out logic[16]
+	public capturedSample3: out logic[16]
+	public capturedSample4: out logic[16]
+	public capturedSample5: out logic[16]
+	public capturedSample6: out logic[16]
+	public capturedSample7: out logic[16]
+	public capturedSample8: out logic[16]
+	public capturedSample9: out logic[16]
+	public capturedSample10: out logic[16]
+	public capturedSample11: out logic[16]
+
+	new(numerator: const int[3], denominator: const int[2],
+		values: const int[COUNT])
+	{
+		source = new BiquadQ15VectorSource<COUNT>(inputStream, values)
+		filter = new BiquadQ15<COEFFICIENT_BITS,
+			COEFFICIENT_FRACTION_BITS>(inputStream, outputStream, numerator,
+			denominator)
+		observer = new BiquadQ15VectorObserver<COUNT>(outputStream)
+	}
+
+	process Connect[]()
+	{
+		observer.ready = outputReady
+		outputValid = observer.valid
+		sourceAccepted = source.accepted
+		accepted = observer.accepted
+		firstSeen = observer.firstSeen
+		lastSeen = observer.lastSeen
+		capturedSample0 = observer.capturedSample0
+		capturedSample1 = observer.capturedSample1
+		capturedSample2 = observer.capturedSample2
+		capturedSample3 = observer.capturedSample3
+		capturedSample4 = observer.capturedSample4
+		capturedSample5 = observer.capturedSample5
+		capturedSample6 = observer.capturedSample6
+		capturedSample7 = observer.capturedSample7
+		capturedSample8 = observer.capturedSample8
+		capturedSample9 = observer.capturedSample9
+		capturedSample10 = observer.capturedSample10
+		capturedSample11 = observer.capturedSample11
+	}
+
+	/**
+	 * Exposes the selected architecture's public initiation interval.
+	 */
+	public fn GetInitiationInterval() int
+	{
+		return filter.INITIATION_INTERVAL
+	}
+
+	/**
+	 * Exposes the selected architecture's nominal latency.
+	 */
+	public fn GetNominalLatency() int
+	{
+		return filter.NOMINAL_LATENCY
+	}
+
+	/**
+	 * Exposes the selected architecture's exact accumulator width.
+	 */
+	public fn GetAccumulatorBits() int
+	{
+		return filter.ACCUMULATOR_BITS
+	}
+}

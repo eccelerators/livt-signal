@@ -1,0 +1,13 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Extends a complex sample stream with a shared nonnegative frame exponent.
+ * The represented complex value is the signed payload multiplied by
+ * 2^scaleExponent. The producer keeps one exponent for every token of a frame
+ * and holds it with the payload during stalls.
+ */
+interface IBlockFloatingComplexSampleStream<T> : IComplexSampleStream<T>
+{
+	// Unsigned base-two exponent shared by every sample in the current frame.
+	scaleExponent: in logic[8]
+}

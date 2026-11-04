@@ -1,0 +1,22 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Transfers signed Q1.15 samples in one clock domain with valid/ready flow control.
+ * A token transfers on an active edge when valid and ready are both true. The
+ * producer holds sample, first, last, and valid stable while a token is stalled.
+ * Reset cancels buffered tokens and incomplete frames; CDC requires an explicit
+ * adapter outside this interface.
+ */
+interface IQ15SampleStream
+{
+	// Exact signed two's-complement Q1.15 payload.
+	sample: in logic[16]
+
+	// Producer-to-consumer token validity and non-empty-frame boundaries.
+	valid: in bool
+	first: in bool
+	last: in bool
+
+	// Consumer capacity for a transfer at the next active edge.
+	ready: out bool
+}

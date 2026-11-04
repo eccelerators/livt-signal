@@ -1,0 +1,24 @@
+namespace Livt.Signal.Transform
+
+/**
+ * Transfers framed complex samples with a payload type selected at compile time.
+ * Use logic[16] for one signed Q1.15 sample per transfer and logic[LANES, 16]
+ * for LANES consecutive samples. Real and imaginary values always have the same
+ * shape. A token transfers when valid and ready are both true; the producer
+ * holds the complete token stable while stalled. Reset cancels buffered tokens
+ * and incomplete frames; clock-domain crossing requires an explicit adapter.
+ */
+interface IComplexSampleStream<T>
+{
+	// Real and imaginary payloads with identical scalar or vector shape.
+	real: in T
+	imag: in T
+
+	// Producer-to-consumer token validity and non-empty-frame boundaries.
+	valid: in bool
+	first: in bool
+	last: in bool
+
+	// Consumer capacity for a transfer at the next active edge.
+	ready: out bool
+}

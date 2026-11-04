@@ -1,0 +1,26 @@
+namespace Livt.Signal.Filter
+
+/**
+ * Native unconstrained-vector FIR datapath shared by every fixed specialization.
+ */
+@Opaque
+component FirQ15PipelinePrimitive
+{
+	// Native stream and datapath ports used by the public wrapper.
+	public inputValid: in bool
+	public inputReady: out bool
+	public inputSample: in logic[16]
+	public inputFirst: in bool
+	public inputLast: in bool
+	public outputValid: out bool
+	public outputReady: in bool
+	public outputSample: out logic[16]
+	public outputFirst: out bool
+	public outputLast: out bool
+
+	/**
+	 * Configures a fixed coefficient vector and its signed fixed-point format.
+	 */
+	new(coefficients: int[], coefficientBits: int,
+		coefficientFractionBits: int) {}
+}

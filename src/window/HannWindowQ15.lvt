@@ -1,0 +1,54 @@
+namespace Livt.Signal.Window
+
+using Livt.Signal.Stream
+
+/**
+ * Symmetric Hann window with fixed Q1.15 coefficients.
+ */
+component HannWindowQ15<SAMPLES: int>
+{
+	static assert SAMPLES == 8 || SAMPLES == 16 || SAMPLES == 32
+		|| SAMPLES == 64 || SAMPLES == 128 || SAMPLES == 256
+		|| SAMPLES == 512 || SAMPLES == 1024 || SAMPLES == 2048
+		|| SAMPLES == 4096,
+		"standard window length must be a supported power of two in 8..4096"
+
+	// Published throughput, latency, capacity, and resource contract.
+	public const INITIATION_INTERVAL: int = 1
+	public const NOMINAL_LATENCY: int = 2
+	public const CAPACITY: int = 2
+	public const MULTIPLIER_COUNT: int = 1
+
+	// Borrowed streams, fixed frame shape, and the owned standard-window datapath.
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	shape: logic[SAMPLES]
+	primitive: StandardWindowQ15PipelinePrimitive
+
+	/**
+	 * Binds borrowed endpoints to a symmetric Hann window of fixed frame length.
+	 */
+	new(inputStream: IQ15SampleStream, outputStream: flip IQ15SampleStream)
+	{
+		this.inputStream = inputStream
+		this.outputStream = outputStream
+		primitive = new StandardWindowQ15PipelinePrimitive(shape, 0, false)
+	}
+
+	/**
+	 * Connects the selected standard-window primitive to the stream endpoints.
+	 */
+	process Drive[]()
+	{
+		primitive.inputValid = inputStream.valid
+		primitive.inputSample = inputStream.sample
+		primitive.inputFirst = inputStream.first
+		primitive.inputLast = inputStream.last
+		primitive.outputReady = outputStream.ready
+		inputStream.ready = primitive.inputReady
+		outputStream.valid = primitive.outputValid
+		outputStream.sample = primitive.outputSample
+		outputStream.first = primitive.outputFirst
+		outputStream.last = primitive.outputLast
+	}
+}

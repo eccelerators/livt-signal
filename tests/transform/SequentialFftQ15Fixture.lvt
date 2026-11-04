@@ -1,0 +1,552 @@
+namespace Livt.Signal.Tests.Transform
+
+using Livt.Signal.Transform
+
+/**
+ * Emits one fixed complex Q1.15 frame while honoring backpressure.
+ */
+component ComplexQ15VectorSource<COUNT: int>
+{
+	stream: IComplexSampleStream<logic[16]>
+	realValues: int[COUNT]
+	imagValues: int[COUNT]
+	index: int
+	public accepted: int
+
+	/**
+	 * Binds a borrowed stream and fixed real and imaginary vectors.
+	 */
+	new(stream: flip IComplexSampleStream<logic[16]>,
+		realValues: const int[COUNT], imagValues: const int[COUNT])
+	{
+		this.stream = stream
+		this.realValues = realValues
+		this.imagValues = imagValues
+	}
+
+	/**
+	 * Emits the frame with one idle cycle between accepted tokens.
+	 */
+	process Send()
+	{
+		state Emit {
+			stream.real = realValues[index] as logic[16]
+			stream.imag = imagValues[index] as logic[16]
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = index == COUNT - 1
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+				accepted++
+
+				if (index == COUNT - 1) {
+					goto Idle
+				} else {
+					index++
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Emit
+		}
+
+		state Idle {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Retains one bounded complex output frame for contract assertions.
+ */
+component ComplexQ15VectorObserver<COUNT: int>
+{
+	stream: IComplexSampleStream<logic[16]>
+	realValues: logic[COUNT, 16]
+	imagValues: logic[COUNT, 16]
+
+	public ready: in bool
+	public valid: out bool
+	public accepted: int
+	public firstSeen: bool
+	public lastSeen: bool
+
+	/**
+	 * Binds the borrowed output stream.
+	 */
+	new(stream: IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Drives capacity and exposes retained output validity.
+	 */
+	process Observe[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready
+		valid = stream.valid
+	}
+
+	/**
+	 * Captures each accepted complex output and its generated markers.
+	 */
+	process Capture()
+	{
+		state {
+			if (stream.valid && stream.ready) {
+				realValues[accepted] = stream.real
+				imagValues[accepted] = stream.imag
+
+				if (accepted == 0 && stream.first) {
+					firstSeen = true
+				}
+
+				if (accepted == COUNT - 1 && stream.last) {
+					lastSeen = true
+				}
+
+				accepted++
+			}
+		}
+	}
+
+	/**
+	 * Returns one retained real component as a signed raw Q1.15 value.
+	 */
+	public fn GetReal(index: int) int
+	{
+		return realValues[index] as int
+	}
+
+	/**
+	 * Returns one retained imaginary component as a signed raw Q1.15 value.
+	 */
+	public fn GetImag(index: int) int
+	{
+		return imagValues[index] as int
+	}
+}
+
+/**
+ * Fixed-vector harness for one sequential FFT or IFFT configuration.
+ */
+component SequentialFftQ15Fixture<COUNT: int,
+	DIRECTION: FftDirection = FftDirection.Forward,
+	STAGE_SHIFT_MASK: int = -1,
+	INPUT_ORDER: FftOrder = FftOrder.Natural,
+	OUTPUT_ORDER: FftOrder = FftOrder.Natural>
+{
+	inputStream: IComplexSampleStream<logic[16]>
+	outputStream: IComplexSampleStream<logic[16]>
+	source: ComplexQ15VectorSource<COUNT>
+	transform: SequentialFftQ15<COUNT, DIRECTION, STAGE_SHIFT_MASK,
+		INPUT_ORDER, OUTPUT_ORDER>
+	observer: ComplexQ15VectorObserver<COUNT>
+
+	public outputReady: in bool
+	public outputValid: out bool
+	public sourceAccepted: out int
+	public accepted: out int
+	public firstSeen: out bool
+	public lastSeen: out bool
+	public frameLengthError: out bool
+
+	/**
+	 * Constructs the fixed source, transform, and retained observer.
+	 */
+	new(realValues: const int[COUNT], imagValues: const int[COUNT])
+	{
+		source = new ComplexQ15VectorSource<COUNT>(inputStream,
+			realValues, imagValues)
+		transform = new SequentialFftQ15<COUNT, DIRECTION,
+			STAGE_SHIFT_MASK, INPUT_ORDER, OUTPUT_ORDER>(inputStream,
+			outputStream)
+		observer = new ComplexQ15VectorObserver<COUNT>(outputStream)
+	}
+
+	/**
+	 * Connects fixture controls and observations.
+	 */
+	process Connect[]()
+	{
+		observer.ready = outputReady
+		outputValid = observer.valid
+		sourceAccepted = source.accepted
+		accepted = observer.accepted
+		firstSeen = observer.firstSeen
+		lastSeen = observer.lastSeen
+		frameLengthError = transform.frameLengthError
+	}
+
+	/**
+	 * Returns one retained real output component.
+	 */
+	public fn GetReal(index: int) int
+	{
+		return observer.GetReal(index)
+	}
+
+	/**
+	 * Returns one retained imaginary output component.
+	 */
+	public fn GetImag(index: int) int
+	{
+		return observer.GetImag(index)
+	}
+
+	/**
+	 * Returns the published transform stage count.
+	 */
+	public fn GetStages() int
+	{
+		return transform.STAGES
+	}
+
+	/**
+	 * Returns the published transform butterfly count.
+	 */
+	public fn GetButterflyCount() int
+	{
+		return transform.BUTTERFLY_COUNT
+	}
+}
+
+/**
+ * Generates one complex impulse frame of a compile-time length.
+ */
+component ComplexQ15ImpulseSource<SAMPLES: int>
+{
+	stream: IComplexSampleStream<logic[16]>
+	index: int
+
+	/**
+	 * Binds the generated impulse to a borrowed producer endpoint.
+	 */
+	new(stream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Generates one natural-order impulse frame.
+	 */
+	process Generate()
+	{
+		state Emit {
+			if (index == 0) {
+				stream.real = 16384 as logic[16]
+			} else {
+				stream.real = 0x0000
+			}
+
+			stream.imag = 0x0000
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = index == SAMPLES - 1
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+
+				if (index == SAMPLES - 1) {
+					goto Idle
+				} else {
+					index++
+					goto Emit
+				}
+			}
+		}
+
+		state Idle {
+			stream.valid = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Checks every complex impulse output against its normalized expected value.
+ */
+component ComplexQ15ImpulseObserver<SAMPLES: int>
+{
+	stream: IComplexSampleStream<logic[16]>
+
+	public ready: in bool
+	public accepted: int
+	public mismatches: int
+	public firstSeen: bool
+	public lastSeen: bool
+
+	/**
+	 * Binds the checker to a borrowed consumer endpoint.
+	 */
+	new(stream: IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Drives consumer capacity without adding a registered handshake boundary.
+	 */
+	process Observe[]()
+	{
+		stream.ready = this.context.rst == 0b0 && ready
+	}
+
+	/**
+	 * Checks normalized impulse bins and output frame markers.
+	 */
+	process Check()
+	{
+		state {
+			if (stream.valid && stream.ready) {
+				if ((stream.real as int) != 16384 / SAMPLES
+					|| (stream.imag as int) != 0) {
+					mismatches++
+				}
+
+				if (accepted == 0 && stream.first) {
+					firstSeen = true
+				}
+
+				if (accepted == SAMPLES - 1 && stream.last) {
+					lastSeen = true
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Generates an impulse and checks every output against its normalized value.
+ */
+component SequentialFftImpulseFixture<SAMPLES: int>
+{
+	inputStream: IComplexSampleStream<logic[16]>
+	outputStream: IComplexSampleStream<logic[16]>
+	source: ComplexQ15ImpulseSource<SAMPLES>
+	transform: SequentialFftQ15<SAMPLES>
+	observer: ComplexQ15ImpulseObserver<SAMPLES>
+
+	public ready: in bool
+	public accepted: out int
+	public mismatches: out int
+	public firstSeen: out bool
+	public lastSeen: out bool
+
+	/**
+	 * Owns one default transform between generated and checked endpoints.
+	 */
+	new()
+	{
+		source = new ComplexQ15ImpulseSource<SAMPLES>(inputStream)
+		transform = new SequentialFftQ15<SAMPLES>(inputStream, outputStream)
+		observer = new ComplexQ15ImpulseObserver<SAMPLES>(outputStream)
+	}
+
+	/**
+	 * Connects checker capacity and observations.
+	 */
+	process Connect[]()
+	{
+		observer.ready = ready
+		accepted = observer.accepted
+		mismatches = observer.mismatches
+		firstSeen = observer.firstSeen
+		lastSeen = observer.lastSeen
+	}
+}
+
+/**
+ * Emits one early-terminated frame followed by one valid impulse frame.
+ */
+component MalformedThenImpulseSource
+{
+	stream: IComplexSampleStream<logic[16]>
+	frame: int
+	index: int
+
+	/**
+	 * Binds the recovery sequence to a borrowed producer endpoint.
+	 */
+	new(stream: flip IComplexSampleStream<logic[16]>)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Generates a three-token malformed frame and then a valid eight-token frame.
+	 */
+	process Send()
+	{
+		state Emit {
+			if (frame == 1 && index == 0) {
+				stream.real = 16384 as logic[16]
+			} else {
+				stream.real = 0x0000
+			}
+
+			stream.imag = 0x0000
+			stream.valid = true
+			stream.first = index == 0
+			stream.last = (frame == 0 && index == 2)
+				|| (frame == 1 && index == 7)
+			goto AwaitAccept
+		}
+
+		state AwaitAccept {
+			if (stream.ready) {
+				stream.valid = false
+
+				if (frame == 0 && index == 2) {
+					frame = 1
+					index = 0
+					goto Gap
+				} elif (frame == 1 && index == 7) {
+					goto Idle
+				} else {
+					index++
+					goto Gap
+				}
+			}
+		}
+
+		state Gap {
+			stream.valid = false
+			stream.first = false
+			stream.last = false
+			goto Emit
+		}
+
+		state Idle {
+			stream.valid = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Checks malformed-frame reporting and recovery at the next first marker.
+ */
+component SequentialFftRecoveryFixture
+{
+	inputStream: IComplexSampleStream<logic[16]>
+	outputStream: IComplexSampleStream<logic[16]>
+	source: MalformedThenImpulseSource
+	transform: SequentialFftQ15<8>
+	observer: ComplexQ15ImpulseObserver<8>
+
+	public ready: in bool
+	public accepted: out int
+	public mismatches: out int
+	public errorSeen: bool
+
+	/**
+	 * Owns the malformed source, transform, and recovery checker.
+	 */
+	new()
+	{
+		source = new MalformedThenImpulseSource(inputStream)
+		transform = new SequentialFftQ15<8>(inputStream, outputStream)
+		observer = new ComplexQ15ImpulseObserver<8>(outputStream)
+	}
+
+	/**
+	 * Connects output capacity and retained observations.
+	 */
+	process Connect[]()
+	{
+		observer.ready = ready
+		accepted = observer.accepted
+		mismatches = observer.mismatches
+	}
+
+	/**
+	 * Retains the transform's one-cycle malformed-frame diagnostic.
+	 */
+	process WatchError()
+	{
+		state {
+			if (transform.frameLengthError) {
+				errorSeen = true
+			}
+		}
+	}
+}
+
+/**
+ * Composes a normalized forward FFT with an unscaled inverse FFT.
+ */
+component SequentialFftRoundTripFixture
+{
+	const TONE_REAL: int[8] = [8192, 5793, 0, -5793,
+		-8192, -5793, 0, 5793]
+	const TONE_IMAG: int[8] = [0, 5793, 8192, 5793,
+		0, -5793, -8192, -5793]
+
+	inputStream: IComplexSampleStream<logic[16]>
+	frequencyStream: IComplexSampleStream<logic[16]>
+	outputStream: IComplexSampleStream<logic[16]>
+	source: ComplexQ15VectorSource<8>
+	forward: SequentialFftQ15<8>
+	inverse: SequentialFftQ15<8, FftDirection.Inverse, 0>
+	observer: ComplexQ15VectorObserver<8>
+
+	public ready: in bool
+	public accepted: out int
+
+	/**
+	 * Owns the source, both transforms, and retained output observer.
+	 */
+	new()
+	{
+		source = new ComplexQ15VectorSource<8>(inputStream,
+			TONE_REAL, TONE_IMAG)
+		forward = new SequentialFftQ15<8>(inputStream, frequencyStream)
+		inverse = new SequentialFftQ15<8, FftDirection.Inverse, 0>(
+			frequencyStream, outputStream)
+		observer = new ComplexQ15VectorObserver<8>(outputStream)
+	}
+
+	/**
+	 * Connects output capacity and accepted-result count.
+	 */
+	process Connect[]()
+	{
+		observer.ready = ready
+		accepted = observer.accepted
+	}
+
+	/**
+	 * Returns one retained real round-trip component.
+	 */
+	public fn GetReal(index: int) int
+	{
+		return observer.GetReal(index)
+	}
+
+	/**
+	 * Returns one retained imaginary round-trip component.
+	 */
+	public fn GetImag(index: int) int
+	{
+		return observer.GetImag(index)
+	}
+}

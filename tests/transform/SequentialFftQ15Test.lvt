@@ -1,0 +1,174 @@
+namespace Livt.Signal.Tests.Transform
+
+using Livt.Signal.Transform
+
+/**
+ * Verifies sequential FFT arithmetic, ordering, scaling, sizing, and stalls.
+ */
+@Test
+component SequentialFftQ15Test
+{
+	const ZERO: int[8] = [0, 0, 0, 0, 0, 0, 0, 0]
+	const IMPULSE: int[8] = [16384, 0, 0, 0, 0, 0, 0, 0]
+	const DC: int[8] = [8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192]
+	const SMALL_DC: int[8] = [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000]
+	const FULL_SCALE: int[8] = [32767, 32767, 32767, 32767,
+		32767, 32767, 32767, 32767]
+	const COSINE: int[8] = [8192, 5793, 0, -5793,
+		-8192, -5793, 0, 5793]
+	const TONE_REAL: int[8] = [8192, 5793, 0, -5793,
+		-8192, -5793, 0, 5793]
+	const TONE_IMAG: int[8] = [0, 5793, 8192, 5793,
+		0, -5793, -8192, -5793]
+	const BIT_REVERSED_TONE_REAL: int[8] = [8192, -8192, 0, 0,
+		5793, -5793, -5793, 5793]
+	const BIT_REVERSED_TONE_IMAG: int[8] = [0, 0, 8192, -8192,
+		5793, -5793, 5793, -5793]
+	const BIN_ONE_REAL: int[8] = [0, 8192, 0, 0, 0, 0, 0, 0]
+
+	impulse: SequentialFftQ15Fixture<8>
+	dc: SequentialFftQ15Fixture<8>
+	tone: SequentialFftQ15Fixture<8>
+	bitReversedInput: SequentialFftQ15Fixture<8, FftDirection.Forward,
+		-1, FftOrder.BitReversed, FftOrder.Natural>
+	bitReversedOutput: SequentialFftQ15Fixture<8, FftDirection.Forward,
+		-1, FftOrder.Natural, FftOrder.BitReversed>
+	inverse: SequentialFftQ15Fixture<8, FftDirection.Inverse>
+	unscaled: SequentialFftQ15Fixture<8, FftDirection.Forward, 0>
+	saturated: SequentialFftQ15Fixture<8, FftDirection.Forward, 0>
+	conjugateSymmetry: SequentialFftQ15Fixture<8>
+	stalled: SequentialFftQ15Fixture<8>
+	roundTrip: SequentialFftRoundTripFixture
+	impulse8: SequentialFftImpulseFixture<8>
+	impulse16: SequentialFftImpulseFixture<16>
+	impulse32: SequentialFftImpulseFixture<32>
+	impulse64: SequentialFftImpulseFixture<64>
+	impulse128: SequentialFftImpulseFixture<128>
+	impulse256: SequentialFftImpulseFixture<256>
+	impulse512: SequentialFftImpulseFixture<512>
+	impulse1024: SequentialFftImpulseFixture<1024>
+	impulse2048: SequentialFftImpulseFixture<2048>
+	impulse4096: SequentialFftImpulseFixture<4096>
+
+	new()
+	{
+		impulse = new SequentialFftQ15Fixture<8>(IMPULSE, ZERO)
+		dc = new SequentialFftQ15Fixture<8>(DC, ZERO)
+		tone = new SequentialFftQ15Fixture<8>(TONE_REAL, TONE_IMAG)
+		bitReversedInput = new SequentialFftQ15Fixture<8,
+			FftDirection.Forward, -1, FftOrder.BitReversed,
+			FftOrder.Natural>(BIT_REVERSED_TONE_REAL,
+			BIT_REVERSED_TONE_IMAG)
+		bitReversedOutput = new SequentialFftQ15Fixture<8,
+			FftDirection.Forward, -1, FftOrder.Natural,
+			FftOrder.BitReversed>(TONE_REAL, TONE_IMAG)
+		inverse = new SequentialFftQ15Fixture<8,
+			FftDirection.Inverse>(BIN_ONE_REAL, ZERO)
+		unscaled = new SequentialFftQ15Fixture<8,
+			FftDirection.Forward, 0>(SMALL_DC, ZERO)
+		saturated = new SequentialFftQ15Fixture<8,
+			FftDirection.Forward, 0>(FULL_SCALE, ZERO)
+		conjugateSymmetry = new SequentialFftQ15Fixture<8>(COSINE, ZERO)
+		stalled = new SequentialFftQ15Fixture<8>(IMPULSE, ZERO)
+		roundTrip = new SequentialFftRoundTripFixture()
+		impulse8 = new SequentialFftImpulseFixture<8>()
+		impulse16 = new SequentialFftImpulseFixture<16>()
+		impulse32 = new SequentialFftImpulseFixture<32>()
+		impulse64 = new SequentialFftImpulseFixture<64>()
+		impulse128 = new SequentialFftImpulseFixture<128>()
+		impulse256 = new SequentialFftImpulseFixture<256>()
+		impulse512 = new SequentialFftImpulseFixture<512>()
+		impulse1024 = new SequentialFftImpulseFixture<1024>()
+		impulse2048 = new SequentialFftImpulseFixture<2048>()
+		impulse4096 = new SequentialFftImpulseFixture<4096>()
+	}
+
+	@Test
+	fn ComputesConfiguredTransformsAndEveryInitialSize()
+	{
+		impulse.outputReady = true
+		dc.outputReady = true
+		tone.outputReady = true
+		bitReversedInput.outputReady = true
+		bitReversedOutput.outputReady = true
+		inverse.outputReady = true
+		unscaled.outputReady = true
+		saturated.outputReady = true
+		conjugateSymmetry.outputReady = true
+		roundTrip.ready = true
+		impulse8.ready = true
+		impulse16.ready = true
+		impulse32.ready = true
+		impulse64.ready = true
+		impulse128.ready = true
+		impulse256.ready = true
+		impulse512.ready = true
+		impulse1024.ready = true
+		impulse2048.ready = true
+		impulse4096.ready = true
+		Simulation.Wait(100)
+
+		assert stalled.outputValid
+		assert stalled.accepted == 0
+		stalled.outputReady = true
+		Simulation.Wait(70000)
+
+		assert impulse.accepted == 8
+		assert impulse.GetReal(0) == 2048
+		assert impulse.GetReal(7) == 2048
+		assert impulse.GetImag(3) == 0
+		assert impulse.firstSeen
+		assert impulse.lastSeen
+
+		assert dc.GetReal(0) >= 8190 && dc.GetReal(0) <= 8192
+		assert dc.GetReal(1) == 0
+		assert dc.GetImag(0) == 0
+
+		assert tone.GetReal(1) >= 8188 && tone.GetReal(1) <= 8192
+		assert tone.GetImag(1) >= -2 && tone.GetImag(1) <= 2
+		assert tone.GetReal(0) >= -2 && tone.GetReal(0) <= 2
+		assert bitReversedInput.GetReal(1) >= 8188
+		assert bitReversedOutput.GetReal(4) >= 8188
+		assert bitReversedOutput.GetReal(1) <= 2
+
+		assert inverse.GetReal(0) >= 1023 && inverse.GetReal(0) <= 1024
+		assert inverse.GetImag(0) == 0
+		assert inverse.GetReal(2) >= -1 && inverse.GetReal(2) <= 1
+		assert inverse.GetImag(2) >= 1023 && inverse.GetImag(2) <= 1024
+		assert unscaled.GetReal(0) >= 7990 && unscaled.GetReal(0) <= 8000
+		assert unscaled.GetReal(1) == 0
+		assert saturated.GetReal(0) == 32767
+		assert conjugateSymmetry.GetReal(1) >= 4092
+		assert conjugateSymmetry.GetReal(7) >= 4092
+		assert conjugateSymmetry.GetImag(1) >= -2
+			&& conjugateSymmetry.GetImag(1) <= 2
+		assert conjugateSymmetry.GetImag(7) >= -2
+			&& conjugateSymmetry.GetImag(7) <= 2
+		assert roundTrip.accepted == 8
+		assert roundTrip.GetReal(0) >= 8186 && roundTrip.GetReal(0) <= 8192
+		assert roundTrip.GetImag(0) >= -2 && roundTrip.GetImag(0) <= 2
+		assert roundTrip.GetReal(2) >= -2 && roundTrip.GetReal(2) <= 2
+		assert roundTrip.GetImag(2) >= 8186 && roundTrip.GetImag(2) <= 8192
+
+		assert stalled.accepted == 8
+		assert stalled.GetReal(0) == 2048
+		assert stalled.firstSeen
+		assert stalled.lastSeen
+		assert impulse.GetStages() == 3
+		assert impulse.GetButterflyCount() == 12
+
+		assert impulse8.accepted == 8
+		assert impulse8.mismatches == 0
+		assert impulse16.accepted == 16 && impulse16.mismatches == 0
+		assert impulse32.accepted == 32 && impulse32.mismatches == 0
+		assert impulse64.accepted == 64 && impulse64.mismatches == 0
+		assert impulse128.accepted == 128 && impulse128.mismatches == 0
+		assert impulse256.accepted == 256 && impulse256.mismatches == 0
+		assert impulse512.accepted == 512 && impulse512.mismatches == 0
+		assert impulse1024.accepted == 1024 && impulse1024.mismatches == 0
+		assert impulse2048.accepted == 2048 && impulse2048.mismatches == 0
+		assert impulse4096.accepted == 4096 && impulse4096.mismatches == 0
+		assert impulse4096.firstSeen
+		assert impulse4096.lastSeen
+	}
+}

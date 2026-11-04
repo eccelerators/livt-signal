@@ -1,0 +1,234 @@
+namespace Livt.Signal.Stream
+
+/**
+ * Produces four consecutive framed tokens without inserting an idle cycle.
+ */
+component Q15ContinuousTestSource
+{
+	stream: IQ15SampleStream
+	public accepted: int
+
+	/**
+	 * Binds the continuous test producer to a producer-side stream endpoint.
+	 */
+	new(stream: flip IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Replaces each accepted token immediately with its successor.
+	 */
+	process Send()
+	{
+		state Prime {
+			stream.sample = 0x8000
+			stream.valid = true
+			stream.first = true
+			stream.last = false
+			goto First
+		}
+
+		state First {
+			if (stream.ready) {
+				accepted++
+				stream.sample = 0xFFFF
+				stream.first = false
+				goto Second
+			}
+		}
+
+		state Second {
+			if (stream.ready) {
+				accepted++
+				stream.sample = 0x0000
+				goto Third
+			}
+		}
+
+		state Third {
+			if (stream.ready) {
+				accepted++
+				stream.sample = 0x7FFF
+				stream.last = true
+				goto Last
+			}
+		}
+
+		state Last {
+			if (stream.ready) {
+				accepted++
+				stream.valid = false
+				stream.last = false
+				goto Idle
+			}
+		}
+
+		state Idle {
+			stream.valid = false
+			goto Idle
+		}
+	}
+}
+
+/**
+ * Alternates capacity and checks every transferred token and stalled value.
+ */
+component Q15AlternatingTestSink
+{
+	stream: IQ15SampleStream
+	public accepted: int
+	public failed: bool
+	public sawStall: bool
+	allow: bool
+	wasStalled: bool
+	heldSample: logic[16]
+	heldFirst: bool
+	heldLast: bool
+
+	/**
+	 * Binds the alternating test consumer to a consumer-side stream endpoint.
+	 */
+	new(stream: IQ15SampleStream)
+	{
+		this.stream = stream
+	}
+
+	/**
+	 * Alternates downstream capacity after reset.
+	 */
+	process Toggle()
+	{
+		state {
+			allow = !allow
+		}
+	}
+
+	/**
+	 * Drives ready from the current alternating-capacity phase.
+	 */
+	process Drive[]()
+	{
+		stream.ready = this.context.rst == 0b0 && allow
+	}
+
+	/**
+	 * Returns the expected payload for one of the four accepted positions.
+	 */
+	fn SampleAt[](index: int) logic[16]
+	{
+		if (index == 0) {
+			return 0x8000
+		}
+
+		if (index == 1) {
+			return 0xFFFF
+		}
+
+		if (index == 2) {
+			return 0x0000
+		}
+
+		return 0x7FFF
+	}
+
+	/**
+	 * Verifies ordering, frame markers, and complete-token stability while stalled.
+	 */
+	process Check()
+	{
+		state {
+			if (stream.valid && !stream.ready) {
+				sawStall = true
+
+				if (wasStalled
+					&& (stream.sample != heldSample || stream.first != heldFirst || stream.last != heldLast)) {
+					failed = true
+				}
+
+				heldSample = stream.sample
+				heldFirst = stream.first
+				heldLast = stream.last
+				wasStalled = true
+			} else {
+				wasStalled = false
+			}
+
+			if (stream.valid && stream.ready) {
+				if (accepted >= 4 || stream.sample != SampleAt(accepted)
+					|| stream.first != (accepted == 0) || stream.last != (accepted == 3)) {
+					failed = true
+				}
+
+				accepted++
+			}
+		}
+	}
+}
+
+/**
+ * Connects a continuous source to an alternating sink through a two-stage delay.
+ */
+component Q15SampleFlowControlFixture
+{
+	inputStream: IQ15SampleStream
+	outputStream: IQ15SampleStream
+	source: Q15ContinuousTestSource
+	delay: Q15SampleDelay<2>
+	sink: Q15AlternatingTestSink
+	public sourceAccepted: out int
+	public sinkAccepted: out int
+	public failed: out bool
+	public sawStall: out bool
+
+	/**
+	 * Creates and connects the continuous flow-control test path.
+	 */
+	new()
+	{
+		source = new Q15ContinuousTestSource(inputStream)
+		delay = new Q15SampleDelay<2>(inputStream, outputStream)
+		sink = new Q15AlternatingTestSink(outputStream)
+	}
+
+	/**
+	 * Publishes the source and sink protocol observations.
+	 */
+	process Observe[]()
+	{
+		sourceAccepted = source.accepted
+		sinkAccepted = sink.accepted
+		failed = sink.failed
+		sawStall = sink.sawStall
+	}
+}
+
+/**
+ * Verifies continuous producer traffic under alternating downstream backpressure.
+ */
+@Test
+component Q15SampleFlowControlTest
+{
+	fixture: Q15SampleFlowControlFixture
+
+	/**
+	 * Creates a fresh continuous flow-control fixture.
+	 */
+	new()
+	{
+		fixture = new Q15SampleFlowControlFixture()
+	}
+
+	/**
+	 * Preserves all consecutive tokens through repeated alternating stalls.
+	 */
+	@Test
+	fn PreservesContinuousTrafficUnderAlternatingStalls()
+	{
+		Simulation.Wait(100)
+		assert fixture.sourceAccepted == 4
+		assert fixture.sinkAccepted == 4
+		assert fixture.sawStall
+		assert !fixture.failed
+	}
+}
