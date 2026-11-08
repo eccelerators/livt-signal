@@ -1,8 +1,21 @@
 [project]
 name = "Livt.Signal"
-version = "0.1.0"
+version = "0.1.1"
+description = "Q1.15 sample streams, filters, windows, rate conversion, FFTs, oscillators, and mixers for Livt."
+authors = ["Denis Vasilík"]
+repository = "https://github.com/eccelerators/livt-signal"
+homepage = "https://github.com/eccelerators/livt-signal"
+keywords = ["fpga", "signal-processing", "filters", "fft", "sample-streams", "oscillators"]
+license = "MIT"
 path = "src"
 outdir = "out"
+
+[publish]
+files = ["README.md", "CHANGELOG.md", "LICENSE"]
+
+[project.organization]
+name = "Eccelerators GmbH"
+website = "https://eccelerators.com"
 
 [tests]
 path = "tests"
@@ -23,9 +36,9 @@ components = [
 ]
 
 [dependencies]
-Livt.Base = "1.2.0"
-Livt.Math = "1.6.0"
-Livt.Collections = "1.4.1"
+Livt.Base = "1.2.1"
+Livt.Math = "1.7.2"
+Livt.Collections = "1.4.2"
 
 [build.debug]
 warnings = ["all"]
