@@ -1,7 +1,7 @@
 # Livt.Signal
 
 `Livt.Signal` provides reusable, hardware-oriented signal-processing components
-for Livt projects. Version 0.1.1 includes signed Q1.15 sample streams, moving
+for Livt projects. Version 0.1.3 includes signed Q1.15 sample streams, moving
 statistics, filters, window functions, sample-rate conversion, FFT/IFFT,
 oscillators, and mixers.
 
@@ -9,14 +9,14 @@ oscillators, and mixers.
 
 ```toml
 [dependencies]
-Livt.Signal = "0.1.1"
+Livt.Signal = "0.1.3"
 ```
 
-Version 0.1.1 publishes package discovery metadata, this README, the changelog,
-and the MIT license. Its component API is unchanged from 0.1.0.
+Version 0.1.3 aligns its Collections dependency with the current standard-library
+package set. Component APIs and signal-processing algorithms remain unchanged.
 
 `Livt.Signal` depends on `Livt.Base 1.2.1`, `Livt.Math 1.7.2`, and
-`Livt.Collections 1.4.2`.
+`Livt.Collections 1.4.4`.
 
 ## Components
 

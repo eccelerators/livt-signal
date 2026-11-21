@@ -2,6 +2,22 @@
 
 All notable changes to this package are documented here.
 
+## 0.1.3 - 2026-11-22
+
+### Changed
+
+- Update `Livt.Collections` to 1.4.4 to align with the standard-library package
+  set and its asynchronous FIFO transfer contract. Component APIs,
+  signal-processing algorithms and other dependency versions remain unchanged.
+
+## 0.1.2 - 2026-11-21
+
+### Changed
+
+- Update `Livt.Collections` to 1.4.3 to align with the standard-library package
+  set and its live FIFO transfer inputs. Component APIs, signal-processing
+  algorithms and other dependency versions remain unchanged.
+
 ## 0.1.1 - 2026-11-08
 
 ### Added
