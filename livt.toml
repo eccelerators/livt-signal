@@ -1,6 +1,6 @@
 [project]
 name = "Livt.Signal"
-version = "0.1.3"
+version = "0.1.4"
 description = "Q1.15 sample streams, filters, windows, rate conversion, FFTs, oscillators, and mixers for Livt."
 authors = ["Denis Vasilík"]
 repository = "https://github.com/eccelerators/livt-signal"
@@ -37,7 +37,7 @@ components = [
 
 [dependencies]
 Livt.Base = "1.2.1"
-Livt.Math = "1.7.2"
+Livt.Math = "1.7.3"
 Livt.Collections = "1.4.4"
 
 [build.debug]

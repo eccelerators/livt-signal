@@ -2,6 +2,15 @@
 
 All notable changes to this package are documented here.
 
+## 0.1.4 - 2026-11-22
+
+### Changed
+
+- Update the arithmetic dependency to `Livt.Math 1.7.3` to avoid unnecessary
+  numeric simulation warnings from invalid divider inputs in moving statistics.
+- Component APIs, signal-processing algorithms, and pipeline timing contracts
+  remain unchanged.
+
 ## 0.1.3 - 2026-11-22
 
 ### Changed
